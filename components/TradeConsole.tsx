@@ -196,7 +196,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
               </div>
               <div>
                 <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Execution Fee</div>
-                <div className="text-sm font-bold text-white tabular-nums">0.015 ETH</div>
+                <div className="text-sm font-bold text-white tabular-nums">0.015 HNC</div>
                 <div className="text-[9px] text-gray-600">Keeper</div>
               </div>
             </div>

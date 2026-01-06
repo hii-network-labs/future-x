@@ -53,7 +53,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
 
 
   const sizeUSD = Number(collateralAmount) * leverage;
-  const keeperFee = 0.0025; // ETH
+  const keeperFee = 0.0025; // HNC
 
   const handleSubmit = () => {
     if (!isWalletConnected || !isValid) return;
@@ -161,7 +161,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
           <DetailRow label="Liq. Price" value={`$${(side === MarketSide.LONG ? currentPrice * 0.82 : currentPrice * 1.18).toFixed(2)}`} warning={leverage > 20} />
           <DetailRow label="Slippage Tolerance" value="0.30%" />
           <div className="pt-2 border-t border-gray-800 mt-2">
-            <DetailRow label="Execution Fee" value={`${keeperFee} ETH`} highlight />
+            <DetailRow label="Execution Fee" value={`${keeperFee} HNC`} highlight />
           </div>
         </div>
 

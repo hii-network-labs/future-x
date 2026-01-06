@@ -34,7 +34,7 @@ export const getTokenDecimals = (address: string) => {
 export const getTokenSymbol = (address: string) => {
   const addr = address.toLowerCase();
   if (addr === CONTRACTS.usdc.toLowerCase()) return "USDC";
-  if (addr === CONTRACTS.wnt.toLowerCase()) return "WNT";
+  if (addr === CONTRACTS.wnt.toLowerCase()) return "HNC";
   return "???";
 };
 

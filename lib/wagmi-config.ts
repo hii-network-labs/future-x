@@ -11,8 +11,8 @@ const chains = [{
   id: CHAIN_ID,
   name: CHAIN_NAME,
   nativeCurrency: { 
-    name: 'ETH', 
-    symbol: 'ETH', 
+    name: 'HNC', 
+    symbol: 'HNC', 
     decimals: 18 
   },
   rpcUrls: {

@@ -128,7 +128,7 @@ const Portfolio: React.FC<PortfolioProps> = ({ chainState }) => {
               )}
               {metrics.ethValue > 0 && (
                 <AllocationRow 
-                  label="ETH/WNT" 
+                  label="HNC" 
                   amount={metrics.ethValue.toFixed(2)}
                   percent={Math.round((metrics.ethValue / metrics.netValue) * 100)}
                   color="bg-emerald-500" 

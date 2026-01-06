@@ -48,7 +48,7 @@ export function useETHBalance(address: `0x${string}` | undefined) {
     decimals: balance?.decimals || 18,
     isLoading,
     refetch,
-    symbol: balance?.symbol || 'ETH',
+    symbol: balance?.symbol || 'HNC',
   };
 }
 
@@ -73,6 +73,6 @@ export function useWNTBalance(address: `0x${string}` | undefined) {
     decimals: balance?.decimals || 18,
     isLoading,
     refetch,
-    symbol: balance?.symbol || 'WNT',
+    symbol: balance?.symbol || 'HNC',
   };
 }

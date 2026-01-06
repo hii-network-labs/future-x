@@ -86,7 +86,7 @@ export function useOrderValidation(
     } else if (errors.insufficientCollateral) {
       errorMessage = 'Insufficient USDC balance';
     } else if (errors.insufficientGas) {
-      errorMessage = `Need ${FEES.minExecutionFee} ETH for gas`;
+      errorMessage = `Need ${FEES.minExecutionFee} HNC for gas`;
     } else if (errors.leverageTooHigh) {
       errorMessage = 'Leverage must be between 1.1x and 50x';
     }

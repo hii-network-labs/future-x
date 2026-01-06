@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { formatUnits } from 'viem';
 
-const SUBGRAPH_URL = 'http://217.216.75.181:8080/v1/graphql';
+const SUBGRAPH_URL = process.env.SUBGRAPH_URL + '/v1/graphql';
 
 export interface LiquidityHistoryItem {
   id: string;

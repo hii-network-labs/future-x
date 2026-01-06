@@ -219,7 +219,7 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
               <div className="space-y-3 bg-black/20 p-4 rounded-lg">
                 <SummaryRow label="Protocol Share Delta" value="+0.015%" />
                 <SummaryRow label="Est. Annual Fee Yield" value="~12.4%" color="text-emerald-400" />
-                <SummaryRow label="Execution Fee" value="0.015 ETH" highlight />
+                <SummaryRow label="Execution Fee" value="0.015 HNC" highlight />
               </div>
 
               <button 
