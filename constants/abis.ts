@@ -36,6 +36,7 @@ export const MULTICALL_ABI = [
         {
           components: [
             { name: 'receiver', type: 'address' },
+            { name: 'cancellationReceiver', type: 'address' },
             { name: 'callbackContract', type: 'address' },
             { name: 'uiFeeReceiver', type: 'address' },
             { name: 'market', type: 'address' },
