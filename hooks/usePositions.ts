@@ -1,7 +1,7 @@
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
 import { READER_ABI } from '../constants/abis';
-import { CONTRACTS, getTokenDecimals, getMarketName, getTokenSymbol } from '../constants';
+import { CONTRACTS, getTokenDecimals, getMarketName, getTokenSymbol, formatGmxPrice } from '../constants';
 import { Position, MarketSide } from '../types';
 import { useMemo } from 'react';
 
@@ -10,7 +10,8 @@ import { useMemo } from 'react';
  */
 export function usePositions(
   address: `0x${string}` | undefined,
-  currentEthPrice: number
+  currentEthPrice: number,
+  allPrices: Record<string, string> = {}
 ) {
   // Fetch positions from Reader contract
   const { data: positionsData, isLoading, refetch } = useReadContract({
@@ -37,9 +38,16 @@ export function usePositions(
       const sizeInUsd = Number(formatUnits(pos.numbers.sizeInUsd, 30));
       
       // Dynamic decimals for collateral
-      const collateralDecimals = getTokenDecimals(pos.addresses.collateralToken);
+      const collateralTokenAddress = pos.addresses.collateralToken.toLowerCase();
+      const collateralDecimals = getTokenDecimals(collateralTokenAddress);
       const collateralAmount = Number(formatUnits(pos.numbers.collateralAmount, collateralDecimals));
-      const collateralSymbol = getTokenSymbol(pos.addresses.collateralToken);
+      const collateralSymbol = getTokenSymbol(collateralTokenAddress);
+
+      // Get collateral price in USD
+      const rawCollateralPrice = allPrices[collateralTokenAddress] || 
+        (collateralTokenAddress === CONTRACTS.usdc.toLowerCase() ? "1000000000000000000000000000000" : "0");
+      const collateralPrice = formatGmxPrice(rawCollateralPrice) || (collateralTokenAddress === CONTRACTS.usdc.toLowerCase() ? 1 : currentEthPrice);
+      const collateralUsd = collateralAmount * collateralPrice;
 
       const isLong = pos.flags.isLong;
       
@@ -48,8 +56,8 @@ export function usePositions(
       const sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, 18));
       const entryPrice = sizeInTokens > 0 ? sizeInUsd / sizeInTokens : currentEthPrice;
       
-      // Calculate leverage
-      const leverage = collateralAmount > 0 ? sizeInUsd / collateralAmount : 0;
+      // Calculate leverage: Size (USD) / Collateral (USD)
+      const leverage = collateralUsd > 0 ? sizeInUsd / collateralUsd : 0;
       
       // Calculate PnL
       const priceDiff = currentEthPrice - entryPrice;

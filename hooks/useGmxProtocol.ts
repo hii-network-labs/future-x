@@ -1,19 +1,9 @@
 
 import { useState, useEffect, useCallback } from 'react';
-import { KEEPER_API_URL, CONTRACTS, FEES, GMX_DECIMALS, USDC_DECIMALS } from '../constants';
+import { KEEPER_API_URL, CONTRACTS, FEES, GMX_DECIMALS, USDC_DECIMALS, formatGmxPrice } from '../constants';
 import { MarketSide, Position, PendingOrder, OrderStatus, OrderType } from '../types';
 
-// Helper to format 30-decimal GMX prices
-export const formatGmxPrice = (priceStr?: string) => {
-  if (!priceStr) return 0;
-  try {
-    const val = BigInt(priceStr);
-    const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
-    return Number(val / divisor) / 100;
-  } catch {
-    return 0;
-  }
-};
+// formatGmxPrice moved to constants.ts
 
 export function useGmxProtocol(address: string | null) {
   const [prices, setPrices] = useState<Record<string, string>>({});

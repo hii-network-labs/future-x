@@ -47,6 +47,18 @@ export const getMarketName = (address: string) => {
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;
 
+// Helper to format 30-decimal GMX prices
+export const formatGmxPrice = (priceStr?: string) => {
+  if (!priceStr) return 0;
+  try {
+    const val = BigInt(priceStr);
+    const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
+    return Number(val / divisor) / 100;
+  } catch {
+    return 0;
+  }
+};
+
 export const COLORS = {
   bg: "#0C111A",
   surface: "#111827",

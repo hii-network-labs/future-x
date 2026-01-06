@@ -25,7 +25,8 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   const { closePosition, isClosing } = useClosePosition();
   const { positions: realPositions, isLoading: positionsLoading } = usePositions(
     chainState.address as `0x${string}`,
-    ethPrice
+    ethPrice,
+    prices
   );
   const [localPositions, setLocalPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
