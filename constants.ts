@@ -24,6 +24,26 @@ export const FEES = {
   minExecutionFee: import.meta.env.VITE_MIN_EXECUTION_FEE || "0.015", // ETH
 };
 
+export const getTokenDecimals = (address: string) => {
+  const addr = address.toLowerCase();
+  if (addr === CONTRACTS.usdc.toLowerCase()) return 6;
+  if (addr === CONTRACTS.wnt.toLowerCase()) return 18;
+  return 18; // Default to 18
+};
+
+export const getTokenSymbol = (address: string) => {
+  const addr = address.toLowerCase();
+  if (addr === CONTRACTS.usdc.toLowerCase()) return "USDC";
+  if (addr === CONTRACTS.wnt.toLowerCase()) return "WNT";
+  return "???";
+};
+
+export const getMarketName = (address: string) => {
+  const addr = address.toLowerCase();
+  if (addr === CONTRACTS.market.toLowerCase()) return "ETH-USD";
+  return "Unknown";
+};
+
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;
 

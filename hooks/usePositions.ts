@@ -1,7 +1,7 @@
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
 import { READER_ABI } from '../constants/abis';
-import { CONTRACTS } from '../constants';
+import { CONTRACTS, getTokenDecimals, getMarketName, getTokenSymbol } from '../constants';
 import { Position, MarketSide } from '../types';
 import { useMemo } from 'react';
 
@@ -35,10 +35,16 @@ export function usePositions(
     return positionsData.map((pos: any, index: number) => {
       // Parse position data (30 decimals for USD values)
       const sizeInUsd = Number(formatUnits(pos.numbers.sizeInUsd, 30));
-      const collateralAmount = Number(formatUnits(pos.numbers.collateralAmount, 6)); // USDC decimals
+      
+      // Dynamic decimals for collateral
+      const collateralDecimals = getTokenDecimals(pos.addresses.collateralToken);
+      const collateralAmount = Number(formatUnits(pos.numbers.collateralAmount, collateralDecimals));
+      const collateralSymbol = getTokenSymbol(pos.addresses.collateralToken);
+
       const isLong = pos.flags.isLong;
       
       // Calculate entry price from position data
+      // Note: sizeInTokens in GMX V2 is also 18 decimals for ETH markets usually
       const sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, 18));
       const entryPrice = sizeInTokens > 0 ? sizeInUsd / sizeInTokens : currentEthPrice;
       
@@ -47,19 +53,25 @@ export function usePositions(
       
       // Calculate PnL
       const priceDiff = currentEthPrice - entryPrice;
-      const pnlPercent = entryPrice > 0 ? (priceDiff / entryPrice) * 100 : 0;
       const pnl = isLong 
         ? (priceDiff / entryPrice) * sizeInUsd 
         : -(priceDiff / entryPrice) * sizeInUsd;
       
       // Calculate liquidation price (simplified)
-      const liqPrice = isLong 
-        ? entryPrice * (1 - (1 / leverage) * 0.9) // 90% of max loss
-        : entryPrice * (1 + (1 / leverage) * 0.9);
+      // If leverage is near 0 or invalid, set a safe liq price
+      let liqPrice = 0;
+      if (leverage > 0) {
+        liqPrice = isLong 
+          ? entryPrice * (1 - (1 / leverage) * 0.9) // 90% of max loss
+          : entryPrice * (1 + (1 / leverage) * 0.9);
+      }
+      
+      // Ensure liqPrice doesn't go negative in UI for Longs
+      if (isLong && liqPrice < 0) liqPrice = 0;
 
       return {
         id: `pos-${index}`,
-        market: 'ETH-PERP',
+        market: `${getMarketName(pos.addresses.market)} (${collateralSymbol})`,
         side: isLong ? MarketSide.LONG : MarketSide.SHORT,
         size: sizeInUsd,
         collateral: collateralAmount,
