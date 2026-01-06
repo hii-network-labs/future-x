@@ -1,7 +1,8 @@
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
 import { READER_ABI } from '../constants/abis';
-import { CONTRACTS, getTokenDecimals, getMarketName, getTokenSymbol, formatGmxPrice } from '../constants';
+import { CONTRACTS, getTokenDecimals, formatGmxPrice } from '../constants';
+import { useMetadata } from './useMetadata';
 import { Position, MarketSide } from '../types';
 import { useMemo } from 'react';
 
@@ -26,6 +27,11 @@ export function usePositions(
       refetchInterval: 3000, // Refresh every 3 seconds
     }
   });
+
+  const marketAddresses = useMemo(() => (positionsData as any[])?.map((p: any) => p.addresses.market) || [], [positionsData]);
+  const tokenAddresses = useMemo(() => (positionsData as any[])?.map((p: any) => p.addresses.collateralToken) || [], [positionsData]);
+  
+  const { getMarketName, getTokenSymbol } = useMetadata(marketAddresses, tokenAddresses);
 
   // Parse and format positions
   const positions = useMemo<Position[]>(() => {
@@ -79,7 +85,7 @@ export function usePositions(
 
       return {
         id: `pos-${index}`,
-        market: `${getMarketName(pos.addresses.market)} (${collateralSymbol})`,
+        market: getMarketName(pos.addresses.market, pos.addresses.collateralToken),
         side: isLong ? MarketSide.LONG : MarketSide.SHORT,
         size: sizeInUsd,
         collateral: collateralAmount,

@@ -31,18 +31,7 @@ export const getTokenDecimals = (address: string) => {
   return 18; // Default to 18
 };
 
-export const getTokenSymbol = (address: string) => {
-  const addr = address.toLowerCase();
-  if (addr === CONTRACTS.usdc.toLowerCase()) return "USDC";
-  if (addr === CONTRACTS.wnt.toLowerCase()) return "HNC";
-  return "???";
-};
-
-export const getMarketName = (address: string) => {
-  const addr = address.toLowerCase();
-  if (addr === CONTRACTS.market.toLowerCase()) return "ETH-USD";
-  return "Unknown";
-};
+// Token metadata is now resolved dynamically in hooks/useMetadata.ts
 
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;

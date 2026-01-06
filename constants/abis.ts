@@ -255,7 +255,27 @@ export const READER_ABI = [
       },
     ],
   },
-] as const;
+  {
+    name: 'getMarket',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dataStore', type: 'address' },
+      { name: 'market', type: 'address' },
+    ],
+    outputs: [
+      {
+        components: [
+          { name: 'marketToken', type: 'address' },
+          { name: 'indexToken', type: 'address' },
+          { name: 'longToken', type: 'address' },
+          { name: 'shortToken', type: 'address' },
+        ],
+        type: 'tuple',
+      },
+    ],
+  },
+];
 
 export const ERC20_ABI = [
   {
@@ -308,6 +328,20 @@ export const ERC20_ABI = [
     outputs: [{ name: '', type: 'bool' }],
     stateMutability: 'nonpayable',
     type: 'function'
+  },
+  {
+    name: 'name',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'string' }],
+  },
+  {
+    name: 'symbol',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'string' }],
   }
 ] as const;
 
