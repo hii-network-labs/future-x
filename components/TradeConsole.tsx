@@ -69,18 +69,25 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     setPendingOrders([newOrder, ...pendingOrders]);
     
     try {
-      // Get current ETH price from keeper
-      const ethPriceStr = prices[CONTRACTS.wnt.toLowerCase()];
-      const currentPrice = ethPriceStr ? BigInt(ethPriceStr) : BigInt(0);
+      // For Market Orders:
+      // Long: acceptablePrice = max (willing to pay any price up to max)
+      // Short: acceptablePrice = 0 (willing to receive any price down to 0)
+      const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+      const acceptablePrice = side === MarketSide.LONG ? MAX_UINT256 : 0n;
       
-      console.log('Open Order Params:', { side, size, collateral, leverage, acceptablePrice: 0n });
+      console.log('🔵 ORDER PARAMS:', { 
+        side: side === MarketSide.LONG ? 'LONG' : 'SHORT',
+        size, 
+        collateral,
+        acceptablePrice: acceptablePrice.toString().slice(0, 20) + '...'
+      });
       
       // Real contract call
       await createOrder({
         sizeDeltaUsd: size,
         collateralAmount: collateral,
         isLong: side === MarketSide.LONG,
-        acceptablePrice: 0n, // Set to 0 to match working script behavior
+        acceptablePrice,
       });
 
       // Update order status to executed

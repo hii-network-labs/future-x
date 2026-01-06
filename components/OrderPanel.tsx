@@ -25,7 +25,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   const { balance: usdcBalance, balanceRaw: usdcBalanceRaw, isLoading: balanceLoading } = useUSDCBalance(address);
   
   const [side, setSide] = useState<MarketSide>(MarketSide.LONG);
-  const [collateralAmount, setCollateralAmount] = useState('1000');
+  const [collateralAmount, setCollateralAmount] = useState('10');
   const [leverage, setLeverage] = useState(5);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

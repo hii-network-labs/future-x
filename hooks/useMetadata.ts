@@ -66,7 +66,8 @@ export function useMetadata(marketAddresses: string[], tokenAddresses: string[])
       });
     }
 
-    console.log('Resolved Metadata:', { tokenSymbols, marketIndexTokens });
+    // Debug log disabled to reduce console noise
+    // console.log('Resolved Metadata:', { tokenSymbols, marketIndexTokens });
     return { tokenSymbols, marketIndexTokens };
   }, [tokensData, marketsData, allTokens, uniqueMarkets]);
 
