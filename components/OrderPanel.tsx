@@ -5,6 +5,8 @@ import { MarketSide } from '../types';
 import { useUSDCBalance } from '../hooks/useBalances';
 import { useOrderValidation } from '../hooks/useOrderValidation';
 import { useTokenApproval } from '../hooks/useTokenApproval';
+import { CONTRACTS } from '../constants';
+import { parseUnits } from 'viem';
 
 interface OrderPanelProps {
   currentPrice: number;
@@ -30,22 +32,25 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   // Validation hook
   const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage);
 
-  // Token approval hook
+  // Token approval hook for USDC
+  const amountBigInt = collateralAmount && !isNaN(parseFloat(collateralAmount)) 
+    ? parseUnits(collateralAmount, 6) 
+    : 0n;
+
   const {
-    needsApproval,
+    isApproved,
     isApproving,
     isConfirming,
-    isConfirmed,
-    handleApprove,
-    refetchAllowance,
-  } = useTokenApproval(address, collateralAmount);
+    approve,
+  } = useTokenApproval({
+    tokenAddress: CONTRACTS.usdc as `0x${string}`,
+    spenderAddress: CONTRACTS.exchangeRouter as `0x${string}`,
+    amount: amountBigInt
+  });
 
-  // Refetch allowance after confirmation
-  useEffect(() => {
-    if (isConfirmed) {
-      refetchAllowance();
-    }
-  }, [isConfirmed, refetchAllowance]);
+  const needsApproval = !isApproved;
+  const handleApprove = approve;
+
 
   const sizeUSD = Number(collateralAmount) * leverage;
   const keeperFee = 0.0025; // ETH
