@@ -113,8 +113,17 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
       });
 
       setTxHash(hash);
-      toast.success('Order submitted! Waiting for confirmation...');
-      console.log('✅ Transaction sent:', hash);
+      
+      // Wait for receipt to check for reversion
+      const receipt = await walletClient.waitForTransactionReceipt({ hash });
+      if (receipt.status === 'reverted') {
+        toast.error('Transaction reverted on-chain');
+        console.error('❌ Transaction reverted:', receipt);
+        throw new Error('Transaction reverted');
+      }
+
+      toast.success('Order submitted! Waiting for keeper execution...');
+      console.log('✅ Transaction confirmed:', hash);
 
       return hash;
     } catch (error: any) {

@@ -13,6 +13,7 @@ import { useClosePosition } from '../hooks/useClosePosition';
 import { useTradeHistory } from '../hooks/useTradeHistory';
 import { MOCK_ORDERS } from '../constants';
 import { CONTRACTS } from '../constants';
+import { useMetadata } from '../hooks/useMetadata';
 import toast, { Toaster } from 'react-hot-toast';
 
 interface TradeConsoleProps {
@@ -28,6 +29,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     ethPrice,
     prices
   );
+  const { getMarketName } = useMetadata([CONTRACTS.market], [CONTRACTS.usdc, CONTRACTS.wnt]);
   const [localPositions, setLocalPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions');
@@ -35,6 +37,20 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   
   // Hooks with pagination
   const { data: tradeHistory = [], isLoading: historyLoading, totalPages, total } = useTradeHistory(chainState.address, historyPage, 10);
+
+  // Sync local positions: remove local if a real position with same market/side/size exists
+  useEffect(() => {
+    if (realPositions.length > 0 && localPositions.length > 0) {
+      setLocalPositions(prev => prev.filter(local => {
+        const isMatched = realPositions.some(real => 
+          real.market === local.market && 
+          real.side === local.side &&
+          Math.abs(real.size - local.size) < 1 // Match within $1
+        );
+        return !isMatched;
+      }));
+    }
+  }, [realPositions, localPositions]);
 
   // Merge real positions with local optimistic updates
   const positions = [...realPositions, ...localPositions];
@@ -57,17 +73,14 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       const ethPriceStr = prices[CONTRACTS.wnt.toLowerCase()];
       const currentPrice = ethPriceStr ? BigInt(ethPriceStr) : BigInt(0);
       
-      // Calculate acceptable price with 10% slippage
-      const acceptablePrice = side === MarketSide.LONG 
-        ? (currentPrice * 110n) / 100n   // Long: willing to pay 10% more
-        : (currentPrice * 90n) / 100n;   // Short: willing to receive 10% less
-
+      console.log('Open Order Params:', { side, size, collateral, leverage, acceptablePrice: 0n });
+      
       // Real contract call
       await createOrder({
         sizeDeltaUsd: size,
         collateralAmount: collateral,
         isLong: side === MarketSide.LONG,
-        acceptablePrice,
+        acceptablePrice: 0n, // Set to 0 to match working script behavior
       });
 
       // Update order status to executed
@@ -78,9 +91,10 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       toast.success('Order created! Waiting for keeper execution...');
       
       // Add to local positions for optimistic UI update
+      const marketName = getMarketName(CONTRACTS.market, CONTRACTS.usdc);
       const newPos: Position = {
-        id: `pos-${Date.now()}`,
-        market: "ETH-PERP",
+        id: `pos-local-${Date.now()}`,
+        market: marketName,
         side,
         size,
         collateral,
@@ -92,14 +106,10 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       };
       setLocalPositions(prev => [newPos, ...prev]);
       
-      // Remove from pending and local after keeper execution (delay for demo)
+      // Keep pending order and local position until real data refreshes
       setTimeout(() => {
         setPendingOrders(prev => prev.filter(o => o.id !== newOrder.id));
-        // Remove local position after real one appears
-        setTimeout(() => {
-          setLocalPositions(prev => prev.filter(p => p.id !== newPos.id));
-        }, 10000); // 10s to allow real position to load
-      }, 5000);
+      }, 10000); // 10s for order to clear from list
 
     } catch (e: any) {
       console.error('Order failed:', e);

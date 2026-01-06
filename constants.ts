@@ -7,6 +7,7 @@ export const CHAIN_NAME = import.meta.env.VITE_CHAIN_NAME || "Custom GMX";
 export const RPC_URL = import.meta.env.VITE_RPC_URL || "http://115.75.100.60:8545";
 export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://127.0.0.1:9090";
 export const EXPLORER_URL = import.meta.env.VITE_EXPLORER_URL || "https://arbiscan.io";
+export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "http://217.216.75.181:8080";
 
 export const CONTRACTS = {
   market: import.meta.env.VITE_MARKET_ADDRESS || "0x68dE251394Ccfda893Cc6796B68e5A8b6944F66e",
@@ -21,7 +22,7 @@ export const CONTRACTS = {
 } as const;
 
 export const FEES = {
-  minExecutionFee: import.meta.env.VITE_MIN_EXECUTION_FEE || "0.015", // ETH
+  minExecutionFee: import.meta.env.VITE_MIN_EXECUTION_FEE || "0.1", // ETH/HNC
 };
 
 export const getTokenDecimals = (address: string) => {

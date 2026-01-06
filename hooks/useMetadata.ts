@@ -4,8 +4,8 @@ import { CONTRACTS } from '../constants';
 import { useMemo } from 'react';
 
 export function useMetadata(marketAddresses: string[], tokenAddresses: string[]) {
-  const uniqueTokens = Array.from(new Set(tokenAddresses)).filter(a => !!a);
-  const uniqueMarkets = Array.from(new Set(marketAddresses)).filter(a => !!a);
+  const uniqueTokens = Array.from(new Set(tokenAddresses)).filter(a => !!a && a !== '0x0000000000000000000000000000000000000000');
+  const uniqueMarkets = Array.from(new Set(marketAddresses)).filter(a => !!a && a !== '0x0000000000000000000000000000000000000000');
 
   // Fetch Market Info (to get index token)
   const marketContracts = uniqueMarkets.map(addr => ({
@@ -40,19 +40,24 @@ export function useMetadata(marketAddresses: string[], tokenAddresses: string[])
 
   // Map results
   const metadata = useMemo(() => {
-    const tokenSymbols: Record<string, string> = {};
-    const marketIndexTokens: Record<string, string> = {};
+    const tokenSymbols: Record<string, string> = {
+      [CONTRACTS.usdc.toLowerCase()]: 'USDC',
+      [CONTRACTS.wnt.toLowerCase()]: 'HNC',
+    };
+    const marketIndexTokens: Record<string, string> = {
+      [CONTRACTS.market.toLowerCase()]: CONTRACTS.wnt.toLowerCase(),
+    };
 
-    if (tokensData) {
+    if (tokensData && Array.isArray(tokensData)) {
       allTokens.forEach((addr, i) => {
         const symbol = tokensData[i]?.result as string;
         if (symbol) {
-          tokenSymbols[addr.toLowerCase()] = symbol;
+          tokenSymbols[addr.toLowerCase()] = symbol === 'WNT' ? 'HNC' : symbol;
         }
       });
     }
 
-    if (marketsData) {
+    if (marketsData && Array.isArray(marketsData)) {
       uniqueMarkets.forEach((addr, i) => {
         const indexToken = marketsData[i]?.result?.indexToken as string;
         if (indexToken) {
@@ -61,6 +66,7 @@ export function useMetadata(marketAddresses: string[], tokenAddresses: string[])
       });
     }
 
+    console.log('Resolved Metadata:', { tokenSymbols, marketIndexTokens });
     return { tokenSymbols, marketIndexTokens };
   }, [tokensData, marketsData, allTokens, uniqueMarkets]);
 

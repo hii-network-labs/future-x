@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { SUBGRAPH_URL as BASE_URL } from '../constants';
 
-const SUBGRAPH_URL = process.env.SUBGRAPH_URL + '/v1/graphql';
+const SUBGRAPH_URL = BASE_URL + '/v1/graphql';
 
 interface TradeAction {
   id: string;
