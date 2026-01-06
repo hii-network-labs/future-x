@@ -1,0 +1,5 @@
+{
+  "name": "Custom GMX Futures Console",
+  "description": "An enterprise-grade DEX futures trading console for Custom GMX (Chain ID 22469), featuring async keeper execution, oracle monitoring, and professional trading UX.",
+  "requestFramePermissions": []
+}
