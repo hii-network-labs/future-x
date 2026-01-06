@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useWalletClient, useWaitForTransactionReceipt } from 'wagmi';
+import { useWalletClient, useConfig, usePublicClient, useWaitForTransactionReceipt } from 'wagmi';
 import { encodeFunctionData, parseUnits, type Hex } from 'viem';
 import { MULTICALL_ABI } from '../constants/abis';
-import { CONTRACTS, FEES } from '../constants';
+import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
 
 interface CreateOrderParams {
@@ -17,6 +17,8 @@ interface CreateOrderParams {
  */
 export function useCreateOrder(address: `0x${string}` | undefined) {
   const { data: walletClient } = useWalletClient();
+  const config = useConfig();
+  const publicClient = usePublicClient();
   const [txHash, setTxHash] = useState<Hex | undefined>();
   const [isCreating, setIsCreating] = useState(false);
 
@@ -105,21 +107,25 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
 
       // Send multicall transaction
       const hash = await walletClient.writeContract({
+        account: address,
         address: CONTRACTS.exchangeRouter as `0x${string}`,
         abi: MULTICALL_ABI,
         functionName: 'multicall',
         args: [calls],
         value: executionFee, // Send ETH for execution fee
+        chain: config.chains.find(c => c.id === CHAIN_ID),
       });
 
       setTxHash(hash);
       
       // Wait for receipt to check for reversion
-      const receipt = await walletClient.waitForTransactionReceipt({ hash });
-      if (receipt.status === 'reverted') {
-        toast.error('Transaction reverted on-chain');
-        console.error('❌ Transaction reverted:', receipt);
-        throw new Error('Transaction reverted');
+      if (publicClient) {
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        if (receipt.status === 'reverted') {
+          toast.error('Transaction reverted on-chain');
+          console.error('❌ Transaction reverted:', receipt);
+          throw new Error('Transaction reverted');
+        }
       }
 
       toast.success('Order submitted! Waiting for keeper execution...');
