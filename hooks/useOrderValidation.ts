@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
 import { parseUnits } from 'viem';
-import { useUSDCBalance, useETHBalance } from './useBalances';
+import { useTokenBalance, useETHBalance } from './useBalances';
+import { useMinCollateral } from './useMinCollateral';
 import { FEES } from '../constants';
 
 interface ValidationErrors {
   insufficientCollateral: boolean;
   belowMinimum: boolean;
+  belowMinCollateral: boolean; // NEW: GMX V2 min collateral after fees
   insufficientGas: boolean;
   leverageTooHigh: boolean;
   invalidAmount: boolean;
@@ -23,10 +25,12 @@ interface ValidationResult {
 export function useOrderValidation(
   address: `0x${string}` | undefined,
   collateralInput: string,
-  leverage: number
+  leverage: number,
+  collateralTokenAddress: `0x${string}` | undefined
 ): ValidationResult {
-  const { balanceRaw: usdcBalanceRaw } = useUSDCBalance(address);
+  const { balanceRaw: tokenBalanceRaw, symbol } = useTokenBalance(address, collateralTokenAddress);
   const { balanceRaw: ethBalanceRaw } = useETHBalance(address);
+  const { minCollateralUsd } = useMinCollateral();
 
   const validation = useMemo(() => {
     // Parse collateral amount
@@ -38,6 +42,7 @@ export function useOrderValidation(
         errors: {
           insufficientCollateral: false,
           belowMinimum: false,
+          belowMinCollateral: false,
           insufficientGas: false,
           leverageTooHigh: false,
           invalidAmount: true,
@@ -56,6 +61,7 @@ export function useOrderValidation(
         errors: {
           insufficientCollateral: false,
           belowMinimum: false,
+          belowMinCollateral: false,
           insufficientGas: false,
           leverageTooHigh: false,
           invalidAmount: true,
@@ -68,10 +74,14 @@ export function useOrderValidation(
     // Minimum execution fee in ETH
     const executionFeeRaw = parseUnits(FEES.minExecutionFee, 18);
 
+    // GMX V2 minimum collateral from DataStore + $1 buffer for fees
+    const MIN_COLLATERAL_WITH_BUFFER = minCollateralUsd + 1;
+
     // Validation checks
     const errors: ValidationErrors = {
-      insufficientCollateral: collateralRaw > usdcBalanceRaw,
+      insufficientCollateral: collateralRaw > tokenBalanceRaw,
       belowMinimum: collateralNum < 1,
+      belowMinCollateral: collateralNum < MIN_COLLATERAL_WITH_BUFFER,
       insufficientGas: ethBalanceRaw < executionFeeRaw,
       leverageTooHigh: leverage > 50 || leverage < 1.1,
       invalidAmount: collateralNum <= 0,
@@ -81,10 +91,10 @@ export function useOrderValidation(
     let errorMessage: string | null = null;
     if (errors.invalidAmount) {
       errorMessage = 'Amount must be greater than 0';
-    } else if (errors.belowMinimum) {
-      errorMessage = 'Minimum collateral: $1';
+    } else if (errors.belowMinCollateral) {
+      errorMessage = `Min collateral: $${MIN_COLLATERAL_WITH_BUFFER.toFixed(0)} (GMX requirement)`;
     } else if (errors.insufficientCollateral) {
-      errorMessage = 'Insufficient USDC balance';
+      errorMessage = `Insufficient ${symbol || 'Collateral'} balance`;
     } else if (errors.insufficientGas) {
       errorMessage = `Need ${FEES.minExecutionFee} HNC for gas`;
     } else if (errors.leverageTooHigh) {
@@ -98,7 +108,7 @@ export function useOrderValidation(
       isValid,
       errorMessage,
     };
-  }, [collateralInput, leverage, usdcBalanceRaw, ethBalanceRaw]);
+  }, [collateralInput, leverage, tokenBalanceRaw, ethBalanceRaw, symbol, minCollateralUsd]);
 
   return validation;
 }

@@ -39,7 +39,6 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     prices
   );
   const { getMarketName } = useMetadata([CONTRACTS.market], [CONTRACTS.usdc, CONTRACTS.wnt]);
-  const [localPositions, setLocalPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions');
   const [historyPage, setHistoryPage] = useState(1);
@@ -47,22 +46,8 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   // Hooks with pagination
   const { data: tradeHistory = [], isLoading: historyLoading, totalPages, total } = useTradeHistory(chainState.address, historyPage, 10);
 
-  // Sync local positions: remove local if a real position with same market/side/size exists
-  useEffect(() => {
-    if (realPositions.length > 0 && localPositions.length > 0) {
-      setLocalPositions(prev => prev.filter(local => {
-        const isMatched = realPositions.some(real => 
-          real.market === local.market && 
-          real.side === local.side &&
-          Math.abs(real.size - local.size) < 1 // Match within $1
-        );
-        return !isMatched;
-      }));
-    }
-  }, [realPositions, localPositions]);
-
-  // Merge real positions with local optimistic updates
-  const positions = [...realPositions, ...localPositions];
+  // Use real positions directly from Reader contract
+  const positions = realPositions;
 
   const handleOpenOrder = async (side: MarketSide, size: number, collateral: number, leverage: number) => {
     const newOrder: PendingOrder = {
@@ -109,28 +94,10 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
         o.id === newOrder.id ? { ...o, status: OrderStatus.EXECUTED } : o
       ));
 
-      toast.success('Order created! Waiting for keeper execution...');
+      // toast.success('Order created! Waiting for keeper execution...'); // Removed redundant toast (handled in hook)
       
-      // Add to local positions for optimistic UI update
-      const marketName = getMarketName(CONTRACTS.market, CONTRACTS.usdc);
-      const newPos: Position = {
-        id: `pos-local-${Date.now()}`,
-        market: marketName,
-        side,
-        size,
-        collateral,
-        entryPrice: ethPrice,
-        markPrice: ethPrice,
-        leverage,
-        liqPrice: side === MarketSide.LONG ? ethPrice * 0.82 : ethPrice * 1.18,
-        pnl: 0
-      };
-      setLocalPositions(prev => [newPos, ...prev]);
-      
-      // Keep pending order and local position until real data refreshes
-      setTimeout(() => {
-        setPendingOrders(prev => prev.filter(o => o.id !== newOrder.id));
-      }, 10000); // 10s for order to clear from list
+      // Position will appear in real data after keeper execution (typically 1-3 seconds)
+      // No need for optimistic update - real data refreshes every 3 seconds
 
     } catch (e: any) {
       console.error('Order failed:', e);
@@ -141,9 +108,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   };
 
   const handleClosePosition = async (id: string) => {
-    // Find in both real and local positions
-    const allPositions = [...realPositions, ...localPositions];
-    const pos = allPositions.find(p => p.id === id);
+    const pos = realPositions.find(p => p.id === id);
     
     if (!pos) return;
     
@@ -164,8 +129,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       
       toast.dismiss('close-position');
       
-      // Remove from local positions optimistically
-      setLocalPositions(prev => prev.filter(p => p.id !== id));
+      // Position will be removed from real data after keeper execution
     } catch (error) {
       console.error('Close position failed:', error);
       toast.dismiss('close-position');
@@ -324,6 +288,8 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
           onOpenOrder={handleOpenOrder} 
           isWalletConnected={chainState.isConnected}
           isCreatingOrder={isCreating}
+          collateralTokenAddress={selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`}
+          collateralTokenSymbol={selectedMarket?.shortSymbol || 'USDC'}
         />
         <RiskDisclosure />
       </div>

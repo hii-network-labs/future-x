@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, usePublicClient } from 'wagmi';
 import { parseUnits } from 'viem';
 import { Vault } from '../../types';
 import { CONTRACTS, FEES } from '../../constants';
-import { useUSDCBalance } from '../../hooks/useBalances';
+import { useTokenBalance } from '../../hooks/useBalances';
 import { useLiquidity } from '../../hooks/useLiquidity';
 import { useCreateDeposit } from '../../hooks/useCreateDeposit';
 import { useCreateWithdrawal } from '../../hooks/useCreateWithdrawal';
@@ -24,7 +24,7 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   const [amount, setAmount] = useState('');
 
   // Hooks
-  const { balance: usdcBalance } = useUSDCBalance(address);
+  const { balance: usdcBalance } = useTokenBalance(address, CONTRACTS.usdc as `0x${string}`);
   const { data: liquidityData } = useLiquidity(
     vault.marketData?.marketToken,
     vault.marketData?.longToken,
@@ -60,7 +60,7 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     approve, 
   } = useTokenApproval({
     tokenAddress: approvalToken as `0x${string}`,
-    spenderAddress: CONTRACTS.exchangeRouter as `0x${string}`,
+    spenderAddress: CONTRACTS.router as `0x${string}`, // FIX: Use Router (same as orders) - it's the actual spender for sendTokens
     amount: amountBigInt
   });
 
@@ -106,16 +106,32 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     }
   };
 
+  // Get public client to wait for tx receipts
+  const publicClient = usePublicClient();
+
   const handleAction = async () => {
     if (!isValid) return;
 
     try {
       if (activeTab === 'add') {
-        // Deposit Flow
+        // ========== DEPOSIT FLOW ==========
+        // 1. Check & Execute Approval if needed
         if (!isApproved) {
-          await approve();
-          return;
+          toast('Approval needed. Please confirm in wallet...', { icon: '🔐' });
+          const approveHash = await approve();
+          if (!approveHash) return;
+          
+          const toastId = toast.loading('Approving USDC...');
+          if (publicClient) {
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            toast.dismiss(toastId);
+            toast.success('Approved! Creating deposit...');
+          }
+          // Small delay for state to settle
+          await new Promise(r => setTimeout(r, 500));
         }
+
+        // 2. Execute Deposit
         await createDeposit({
           marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
           tokenAddress: activeSingleToken as `0x${string}`,
@@ -123,27 +139,38 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
           decimals: 6 // USDC
         });
         setAmount('');
-      } else {
-        // Withdraw Flow
-        // 1. Check GM Token Approval
-        if (!isApproved) {
-          await approve();
-          return;
-        }
-        // 2. WNT Token Approval is not needed for execution fee as it's native.
 
+      } else {
+        // ========== WITHDRAW FLOW ==========
+        // 1. Check & Execute Approval if needed  
+        if (!isApproved) {
+          toast('Approval needed. Please confirm in wallet...', { icon: '🔐' });
+          const approveHash = await approve();
+          if (!approveHash) return;
+          
+          const toastId = toast.loading(`Approving ${vault.token}...`);
+          if (publicClient) {
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            toast.dismiss(toastId);
+            toast.success('Approved! Creating withdrawal...');
+          }
+          // Small delay for state to settle
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // 2. Execute Withdrawal
         await createWithdrawal({
           marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
-          marketTokenAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`, // GM Token IS the Market contract usually
+          marketTokenAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
           amount,
           decimals: 18 // GM Token
         });
         setAmount('');
       }
       
-      // We don't close immediately anymore, we wait for confirmation or user action
     } catch (e) {
       console.error(e);
+      toast.error('Operation failed');
     }
   };
 
@@ -230,13 +257,18 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
               <button 
                 onClick={handleAction}
                 disabled={!isConnected || !isValid || isSubmitting}
-                className={`w-full py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 ${activeTab === 'add' ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-amber-500 text-black hover:bg-amber-400'}`}
+                className={`w-full py-4 rounded-xl font-bold text-sm uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 ${activeTab === 'add' ? 'bg-emerald-500 text-black hover:bg-emerald-400' : 'bg-amber-500 text-black hover:bg-amber-400'}`}
               >
-                {isSubmitting ? 'Processing...' : (
+                {isSubmitting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    <span>{isApproving ? 'Approving...' : isDepositing ? 'Depositing...' : isWithdrawing ? 'Withdrawing...' : 'Processing...'}</span>
+                  </>
+                ) : (
                   activeTab === 'add' 
-                    ? (!isApproved ? 'Approve USDC' : `Deposit ${vault.token}`) 
-                    : (!isApproved ? `Approve ${vault.token}` : `Withdraw ${vault.token}`)
-                  )}
+                    ? `Deposit ${vault.token}` 
+                    : `Withdraw ${vault.token}`
+                )}
               </button>
             </div>
           </div>

@@ -1,28 +1,34 @@
 
 import React, { useState, useEffect } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, usePublicClient } from 'wagmi';
 import { MarketSide } from '../types';
-import { useUSDCBalance } from '../hooks/useBalances';
+import { useTokenBalance } from '../hooks/useBalances';
 import { useOrderValidation } from '../hooks/useOrderValidation';
 import { useTokenApproval } from '../hooks/useTokenApproval';
 import { CONTRACTS } from '../constants';
 import { parseUnits } from 'viem';
+import toast from 'react-hot-toast';
 
 interface OrderPanelProps {
   currentPrice: number;
   onOpenOrder: (side: MarketSide, size: number, collateral: number, leverage: number) => void;
   isWalletConnected: boolean;
-  isCreatingOrder?: boolean; // Loading state during tx
+  isCreatingOrder?: boolean;
+  collateralTokenAddress: `0x${string}`;
+  collateralTokenSymbol: string;
 }
 
 const OrderPanel: React.FC<OrderPanelProps> = ({ 
   currentPrice, 
   onOpenOrder, 
   isWalletConnected,
-  isCreatingOrder = false 
+  isCreatingOrder = false,
+  collateralTokenAddress,
+  collateralTokenSymbol
 }) => {
   const { address } = useAccount();
-  const { balance: usdcBalance, balanceRaw: usdcBalanceRaw, isLoading: balanceLoading } = useUSDCBalance(address);
+  // Use dynamic token balance
+  const { balance: tokenBalance, balanceRaw: tokenBalanceRaw, isLoading: balanceLoading } = useTokenBalance(address, collateralTokenAddress);
   
   const [side, setSide] = useState<MarketSide>(MarketSide.LONG);
   const [collateralAmount, setCollateralAmount] = useState('10');
@@ -30,7 +36,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Validation hook
-  const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage);
+  const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage, collateralTokenAddress);
 
   // Token approval hook for USDC
   const amountBigInt = collateralAmount && !isNaN(parseFloat(collateralAmount)) 
@@ -43,8 +49,8 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
     isConfirming,
     approve,
   } = useTokenApproval({
-    tokenAddress: CONTRACTS.usdc as `0x${string}`,
-    spenderAddress: CONTRACTS.exchangeRouter as `0x${string}`,
+    tokenAddress: collateralTokenAddress, // Fix: Use dynamic token
+    spenderAddress: CONTRACTS.router as `0x${string}`,
     amount: amountBigInt
   });
 
@@ -55,21 +61,57 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   const sizeUSD = Number(collateralAmount) * leverage;
   const keeperFee = 0.0025; // HNC
 
-  const handleSubmit = () => {
+  // Get public client for waiting for tx
+  const publicClient = usePublicClient();
+
+  const handleSmartSubmit = async () => {
     if (!isWalletConnected || !isValid) return;
+    
     setIsSubmitting(true);
-    // Simulate async prep
-    setTimeout(() => {
+    
+    try {
+      // 1. Check & Execute Approval if needed
+      if (needsApproval) {
+        toast('Approval needed. Please confirm in your wallet...', { icon: '🔐' });
+        const hash = await approve();
+        if (!hash) {
+          setIsSubmitting(false);
+          return;
+        }
+
+        const toastId = toast.loading(`Approving ${collateralTokenSymbol}...`);
+        
+        // Wait for approval to be mined
+        if (publicClient) {
+          await publicClient.waitForTransactionReceipt({ hash });
+          toast.dismiss(toastId);
+          toast.success(`Approved! Creating order...`);
+        }
+      }
+
+      // 2. Open Order
+      // Small delay to let indexed state settle (optional, but safer)
+      await new Promise(r => setTimeout(r, 500));
+      
       onOpenOrder(side, sizeUSD, Number(collateralAmount), leverage);
+      
+      // Clear inputs after successful order
+      setCollateralAmount('');
+      setLeverage(5);
+      
+    } catch (e) {
+      console.error(e);
+      toast.error('Operation failed');
+    } finally {
       setIsSubmitting(false);
-    }, 500);
+    }
   };
 
   // MAX button handler
   const handleMaxClick = () => {
-    if (usdcBalanceRaw > 0n) {
+    if (tokenBalanceRaw > 0n) {
       // Use actual balance from hook
-      setCollateralAmount(usdcBalance);
+      setCollateralAmount(tokenBalance);
     }
   };
 
@@ -95,9 +137,9 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
         {/* Collateral Input */}
         <div>
           <div className="flex justify-between items-end mb-2">
-            <label className="text-xs text-gray-500 font-bold uppercase">Collateral (USDC)</label>
+            <label className="text-xs text-gray-500 font-bold uppercase">Collateral ({collateralTokenSymbol})</label>
             <span className="text-[10px] text-gray-400">
-              {balanceLoading ? 'Loading...' : `Bal: ${usdcBalance} USDC`}
+              {balanceLoading ? 'Loading...' : `Bal: ${tokenBalance} ${collateralTokenSymbol}`}
             </span>
           </div>
           <div className="relative group">
@@ -111,7 +153,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
               placeholder="0.00"
             />
             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
-              <span className="text-sm text-gray-500 font-bold">USDC</span>
+              <span className="text-sm text-gray-500 font-bold">{collateralTokenSymbol}</span>
               <button 
                 onClick={handleMaxClick}
                 disabled={!isWalletConnected || balanceLoading}
@@ -165,28 +207,10 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
           </div>
         </div>
 
-        {/* Approve Button (if needed) */}
-        {isWalletConnected && needsApproval && isValid && (
-          <button
-            onClick={handleApprove}
-            disabled={isApproving || isConfirming || isCreatingOrder}
-            className="w-full py-3 rounded-xl font-bold text-sm transition-all bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isApproving || isConfirming ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Approving...</span>
-              </>
-            ) : (
-              'Approve USDC'
-            )}
-          </button>
-        )}
-
         {/* CTA */}
         <button 
-          onClick={handleSubmit}
-          disabled={!isWalletConnected || !isValid || isSubmitting || needsApproval || isCreatingOrder}
+          onClick={handleSmartSubmit}
+          disabled={!isWalletConnected || !isValid || isSubmitting || isCreatingOrder}
           className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-lg shadow-emerald-500/5 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
             side === MarketSide.LONG 
             ? 'bg-emerald-500 text-black hover:bg-emerald-400' 
@@ -195,17 +219,10 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
         >
           {!isWalletConnected ? (
             'Connect Wallet'
-          ) : needsApproval ? (
-            'Approve USDC First'
-          ) : isCreatingOrder ? (
+          ) : isSubmitting || isCreatingOrder ? (
             <>
               <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              <span>Confirming...</span>
-            </>
-          ) : isSubmitting ? (
-            <>
-              <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              <span>Processing...</span>
+              <span>{needsApproval && isSubmitting ? 'Approving...' : 'Processing...'}</span>
             </>
           ) : errorMessage && !isValid ? (
             errorMessage

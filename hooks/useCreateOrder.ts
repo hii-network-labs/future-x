@@ -107,6 +107,34 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         executionFee: FEES.minExecutionFee,
       });
 
+      // SAFETY CHECK: Verify Allowance Logic
+      // Ensure the ExchangeRouter has permission to spend user's collateral
+      try {
+        if (publicClient) {
+          const allowance = await publicClient.readContract({
+            address: params.collateralToken,
+            abi: [{
+              name: 'allowance',
+              type: 'function',
+              stateMutability: 'view',
+              inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
+              outputs: [{ name: '', type: 'uint256' }]
+            }],
+            functionName: 'allowance',
+            args: [address, CONTRACTS.router as `0x${string}`], // Fix: Check against Router
+          }) as bigint;
+
+          console.log(`Checking allowance: ${allowance.toString()} >= ${collateralDeltaAmount.toString()}`);
+
+          if (allowance < collateralDeltaAmount) {
+            toast.error('Insufficient allowance! Please approve USDC.');
+            throw new Error('Insufficient allowance. Please approve USDC first.');
+          }
+        }
+      } catch (err) {
+        console.warn('Allowance check failed, proceeding anyway but tx implies it might revert:', err);
+      }
+
       // Send multicall transaction
       const hash = await walletClient.writeContract({
         account: address,

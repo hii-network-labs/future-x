@@ -67,11 +67,47 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
        }
     } else if (event === 'OrderCancelled') {
       label = 'Cancelled';
+      colorClass = 'text-amber-400';
+      bgClass = 'bg-amber-500/10';
       if (type === 2 || type === 3) label = `Cancel Open ${isLong ? 'Long' : 'Short'}`;
       if (type === 4 || type === 5 || type === 6) label = `Cancel Close ${isLong ? 'Long' : 'Short'}`;
     }
 
     return { label, colorClass, bgClass };
+  };
+
+  // Decode cancel reason from reasonBytes (if reason string is empty)
+  const getCancelReason = (trade: any): string | null => {
+    if (trade.eventName !== 'OrderCancelled') return null;
+    
+    // Try reason string first
+    if (trade.reason && trade.reason.trim() !== '') {
+      return trade.reason;
+    }
+    
+    // Decode from reasonBytes (hex) - extract readable ASCII
+    if (trade.reasonBytes) {
+      try {
+        const hex = trade.reasonBytes.replace('0x', '');
+        let decoded = '';
+        for (let i = 0; i < hex.length; i += 2) {
+          const code = parseInt(hex.substr(i, 2), 16);
+          if (code >= 32 && code < 127) {
+            decoded += String.fromCharCode(code);
+          }
+        }
+        // Extract common GMX error patterns
+        if (decoded.includes('min collateral')) return 'Min Collateral';
+        if (decoded.includes('empty order')) return 'Empty Order';
+        if (decoded.includes('insufficient')) return 'Insufficient Balance';
+        if (decoded.includes('price')) return 'Price Rejection';
+        if (decoded.trim().length > 0) return decoded.trim().slice(0, 30);
+      } catch {
+        // Ignore decode errors
+      }
+    }
+    
+    return null;
   };
 
   const formatDate = (timestamp: number) => {
@@ -149,9 +185,16 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
                       <div className="text-xs text-gray-400 font-mono">{formatDate(trade.timestamp)}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-xs font-bold px-2 py-1 rounded whitespace-nowrap ${action.bgClass} ${action.colorClass}`}>
-                        {action.label}
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <span className={`text-xs font-bold px-2 py-1 rounded whitespace-nowrap w-fit ${action.bgClass} ${action.colorClass}`}>
+                          {action.label}
+                        </span>
+                        {getCancelReason(trade) && (
+                          <span className="text-[10px] text-amber-500/80 font-medium pl-1">
+                            ⚠️ {getCancelReason(trade)}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="text-sm font-medium text-gray-300">

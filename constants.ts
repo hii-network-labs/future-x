@@ -14,6 +14,7 @@ export const CONTRACTS = {
   wnt: import.meta.env.VITE_WNT_ADDRESS || "0xd020d6D39b5550bdc3440Ff8f6EA5f1Cf745b13c",
   usdc: import.meta.env.VITE_USDC_ADDRESS || "0xE0105CF6930e8767ADb5425ddc7f8B6df25699A6",
   exchangeRouter: import.meta.env.VITE_EXCHANGE_ROUTER || "0xD5c0a7DFe2e4a5D1BE5927d0816393d145a3f0d5",
+  router: import.meta.env.VITE_ROUTER || "0x25bdBd9c21497D276000D4ebB9203DbE2eD408f7", // Correct spender for GMX V2
   orderVault: import.meta.env.VITE_ORDER_VAULT || "0xe5474698f1A1c0381BB21476BdA1A4968d017D3a",
   reader: import.meta.env.VITE_READER_ADDRESS || "0x81ec3c87553EDaBd7b391AED31ee6EDd51Ec54b7",
   dataStore: import.meta.env.VITE_DATASTORE_ADDRESS || "0xF2ea404864b2E9cd5DCA985079Bee6e9BC3AedE2",
