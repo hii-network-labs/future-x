@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
 import { ChainState } from '../types';
-import { useUSDCBalance, useETHBalance, useWNTBalance } from '../hooks/useBalances';
+import { useTokenBalance, useETHBalance, useWNTBalance } from '../hooks/useBalances';
 import { usePositions } from '../hooks/usePositions';
 import { useGmxProtocol } from '../hooks/useGmxProtocol';
+import { CONTRACTS } from '../constants'; // Import CONTRACTS for USDC address
 
 interface PortfolioProps {
   chainState: ChainState;
@@ -11,7 +12,7 @@ interface PortfolioProps {
 const Portfolio: React.FC<PortfolioProps> = ({ chainState }) => {
   const { ethPrice } = useGmxProtocol(chainState.address);
   const { positions } = usePositions(chainState.address as `0x${string}`, ethPrice);
-  const { balance: usdcBalance, isLoading: usdcLoading } = useUSDCBalance(chainState.address as `0x${string}`);
+  const { balance: usdcBalance, isLoading: usdcLoading } = useTokenBalance(chainState.address as `0x${string}`, CONTRACTS.usdc as `0x${string}`);
   const { balance: ethBalance, isLoading: ethLoading } = useETHBalance(chainState.address as `0x${string}`);
   const { balance: wntBalance, isLoading: wntLoading } = useWNTBalance(chainState.address as `0x${string}`);
 

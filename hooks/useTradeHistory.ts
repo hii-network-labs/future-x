@@ -22,6 +22,8 @@ interface TradeAction {
   borrowingFeeAmount: string | null;
   fundingFeeAmount: string | null;
   isLong: boolean | null;
+  reason: string | null;
+  reasonBytes: string | null;
   timestamp: number;
   transaction: {
     hash: string;
@@ -63,6 +65,8 @@ const TRADE_HISTORY_QUERY = `
       borrowingFeeAmount
       fundingFeeAmount
       isLong
+      reason
+      reasonBytes
       timestamp
       transaction {
         hash
