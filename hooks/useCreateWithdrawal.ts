@@ -13,7 +13,8 @@ interface CreateWithdrawalParams {
 }
 
 /**
- * Hook to create GMX withdrawals (remove liquidity) via creating a Withdrawal Order
+ * Hook to create GMX withdrawals (remove liquidity) via multicall
+ * REFACTORED: Now uses multicall like createDeposit instead of sequential transactions
  */
 export function useCreateWithdrawal(address: `0x${string}` | undefined) {
   const { data: walletClient } = useWalletClient();
@@ -33,87 +34,13 @@ export function useCreateWithdrawal(address: `0x${string}` | undefined) {
     }
 
     setIsCreating(true);
-    let toastId;
 
     try {
       // 1. Parse amounts
       const amountBigInt = parseUnits(params.amount, params.decimals);
-      const executionFee = parseUnits(FEES.minExecutionFee, 18); // ETH decimals
+      const executionFee = parseUnits(FEES.minExecutionFee, 18);
 
-      // Helper to check receipt status
-      const checkReceipt = (receipt: any, stepName: string) => {
-        if (receipt.status !== 'success') {
-          throw new Error(`${stepName} failed on-chain`);
-        }
-      };
-
-      // 1. Check WNT Balance & Wrap if needed (User needs WNT for fee transfer)
-      toastId = toast.loading('Checking WNT Balance...');
-      try {
-          const wntBalance = await publicClient.readContract({
-              address: CONTRACTS.wnt as `0x${string}`,
-              abi: ERC20_ABI,
-              functionName: 'balanceOf',
-              args: [address]
-          }) as bigint;
-
-          if (wntBalance < executionFee) {
-              const needed = executionFee - wntBalance;
-              toast.loading(`Wrapping ${Number(needed)/1e18} ETH for Fee...`, { id: toastId });
-              console.log('🔄 Wrapping ETH for WNT Fee...');
-              const hashWrap = await walletClient.writeContract({
-                  address: CONTRACTS.wnt as `0x${string}`,
-                  abi: WETH_ABI,
-                  functionName: 'deposit',
-                  value: needed,
-                  gas: 500000n,
-                  chain: undefined,
-                  account: address
-              });
-              const receiptWrap = await publicClient.waitForTransactionReceipt({ hash: hashWrap });
-              checkReceipt(receiptWrap, 'Wrap ETH');
-              toast.success('Wrapped ETH successfully', { id: toastId });
-          }
-      } catch(e) {
-          console.error("Auto-wrap failed", e);
-          toast.error("Auto-wrap check failed. Proceeding...", { id: toastId });
-          // Fallback: If wrap failed, subsequent transfer might fail if balance low, but we try.
-      }
-
-      // 2. Transfer WNT (Execution Fee) to Vault
-      toast.loading('Transferring Fee...', { id: toastId });
-      console.log('📤 Transferring WNT Fee...');
-      const txFee = await walletClient.writeContract({
-          address: CONTRACTS.wnt as `0x${string}`,
-          abi: ERC20_ABI,
-          functionName: 'transfer',
-          args: [CONTRACTS.withdrawalVault as `0x${string}`, executionFee],
-          gas: 200000n,
-          chain: undefined,
-          account: address
-      });
-      const receiptFee = await publicClient.waitForTransactionReceipt({ hash: txFee });
-      checkReceipt(receiptFee, 'Transfer Fee');
-
-      // 3. Transfer GM to Vault
-      toast.loading('Transferring GM...', { id: toastId });
-      console.log('📤 Transferring GM...');
-      const txGm = await walletClient.writeContract({
-          address: params.marketTokenAddress as `0x${string}`,
-          abi: ERC20_ABI,
-          functionName: 'transfer',
-          args: [CONTRACTS.withdrawalVault as `0x${string}`, amountBigInt],
-          gas: 200000n,
-          chain: undefined,
-          account: address
-      });
-      const receiptGm = await publicClient.waitForTransactionReceipt({ hash: txGm });
-      checkReceipt(receiptGm, 'Transfer GM');
-
-      // 4. Create Withdrawal
-      toast.loading('Finalizing Withdrawal...', { id: toastId });
-      console.log('📝 Creating Withdrawal Call...');
-      
+      // 2. Build CreateWithdrawalParams
       const withdrawalParams = {
         addresses: {
           receiver: address,
@@ -125,34 +52,65 @@ export function useCreateWithdrawal(address: `0x${string}` | undefined) {
         },
         minLongTokenAmount: 0n,
         minShortTokenAmount: 0n,
-        shouldUnwrapNativeToken: true,
+        shouldUnwrapNativeToken: true, // Unwrap WNT to native ETH
         executionFee,
         callbackGasLimit: 200000n,
         dataList: [] as `0x${string}`[],
       };
 
-      const hash = await walletClient.writeContract({
-        address: CONTRACTS.exchangeRouter as `0x${string}`,
-        abi: MULTICALL_ABI, // Contains createWithdrawal
-        functionName: 'createWithdrawal',
-        args: [withdrawalParams],
-        value: 0n, // Fee already sent in WNT
-        gas: 3000000n,
-        chain: undefined,
-        account: address
+      // 3. Encode Multicall - all in one transaction
+      const calls = [
+        // A. Send Execution Fee (WNT) to WithdrawalVault
+        encodeFunctionData({
+          abi: MULTICALL_ABI,
+          functionName: 'sendWnt',
+          args: [CONTRACTS.withdrawalVault as `0x${string}`, executionFee],
+        }),
+        // B. Send GM Tokens to WithdrawalVault
+        encodeFunctionData({
+          abi: MULTICALL_ABI,
+          functionName: 'sendTokens',
+          args: [
+            params.marketTokenAddress,
+            CONTRACTS.withdrawalVault as `0x${string}`,
+            amountBigInt,
+          ],
+        }),
+        // C. Call createWithdrawal
+        encodeFunctionData({
+          abi: MULTICALL_ABI,
+          functionName: 'createWithdrawal',
+          args: [withdrawalParams],
+        }),
+      ];
+
+      console.log('📤 Submitting Withdrawal:', {
+        market: params.marketAddress,
+        gmAmount: params.amount,
+        fee: FEES.minExecutionFee,
       });
 
-      console.log('✅ Withdrawal Submitted:', hash);
+      // 4. Send Single Transaction via multicall
+      const hash = await walletClient.writeContract({
+        address: CONTRACTS.exchangeRouter as `0x${string}`,
+        abi: MULTICALL_ABI,
+        functionName: 'multicall',
+        args: [calls],
+        value: executionFee, // Msg.value covers the WNT sent
+        chain: undefined,
+        account: walletClient.account,
+      });
+
       setTxHash(hash);
-      toast.success('Withdrawal submitted successfully!', { id: toastId });
+      toast.success('Withdrawal submitted! Burning GM tokens...');
       return hash;
 
     } catch (error: any) {
       console.error('❌ Withdrawal failed:', error);
       if (error.message?.includes('User rejected')) {
-        toast.error('Transaction cancelled', { id: toastId });
+        toast.error('Transaction cancelled');
       } else {
-        toast.error('Withdrawal failed: ' + (error.shortMessage || error.message), { id: toastId });
+        toast.error('Withdrawal failed: ' + (error.shortMessage || error.message));
       }
       throw error;
     } finally {
