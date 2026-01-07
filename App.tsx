@@ -9,6 +9,7 @@ import TradeConsole from './components/TradeConsole';
 import Portfolio from './components/Portfolio';
 import LiquidityConsole from './components/LiquidityConsole';
 import WrongChainBanner from './components/WrongChainBanner';
+import { MarketProvider } from './contexts/MarketContext';
 import { CHAIN_ID, CHAIN_NAME } from './constants';
 
 const App: React.FC = () => {
@@ -26,6 +27,7 @@ const App: React.FC = () => {
 
   return (
     <HashRouter>
+      <MarketProvider>
       <div className="flex min-h-screen text-gray-200">
         <Sidebar />
         
@@ -57,6 +59,7 @@ const App: React.FC = () => {
           border: '1px solid #374151',
         },
       }} />
+      </MarketProvider>
     </HashRouter>
   );
 };

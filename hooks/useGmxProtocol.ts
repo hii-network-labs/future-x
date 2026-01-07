@@ -1,14 +1,22 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { KEEPER_API_URL, CONTRACTS, FEES, GMX_DECIMALS, USDC_DECIMALS, formatGmxPrice } from '../constants';
 import { MarketSide, Position, PendingOrder, OrderStatus, OrderType } from '../types';
 
 // formatGmxPrice moved to constants.ts
 
-export function useGmxProtocol(address: string | null) {
+/**
+ * Hook for GMX protocol data - now accepts indexToken param for multi-market support
+ * @param address - User wallet address
+ * @param indexToken - Index token address for the selected market (defaults to WNT)
+ */
+export function useGmxProtocol(address: string | null, indexToken?: `0x${string}`) {
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [positions, setPositions] = useState<Position[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Use provided indexToken or default to WNT
+  const activeIndexToken = indexToken?.toLowerCase() || CONTRACTS.wnt.toLowerCase();
 
   // 1. Real-time Price Polling
   useEffect(() => {
@@ -47,43 +55,25 @@ export function useGmxProtocol(address: string | null) {
     fetchPositions();
   }, [fetchPositions]);
 
-  // 3. Create Order (Integrated Logic)
-  const createOrder = async (params: {
-    sizeDeltaUsd: number;
-    collateralAmount: number;
-    isLong: boolean;
-  }) => {
-    if (!address) throw new Error("Wallet not connected");
+  // 3. Calculate current price for selected market
+  const currentPrice = useMemo(() => {
+    const priceStr = prices[activeIndexToken];
+    return formatGmxPrice(priceStr) || 0;
+  }, [prices, activeIndexToken]);
 
-    // Integration Logic from Guide Section 3:
-    // 1. Calculate acceptable price with 10% slippage
-    const ethPriceStr = prices[CONTRACTS.wnt.toLowerCase()];
-    const currentPrice = ethPriceStr ? BigInt(ethPriceStr) : BigInt(0);
-    const acceptablePrice = params.isLong 
-      ? (currentPrice * 110n) / 100n 
-      : (currentPrice * 90n) / 100n;
-
-    console.log("Protocol Request: createOrder", {
-      market: CONTRACTS.market,
-      acceptablePrice: acceptablePrice.toString(),
-      executionFee: FEES.minExecutionFee,
-      multicall: [
-        "sendWnt(orderVault, fee)",
-        "sendTokens(usdc, orderVault, collateral)",
-        "createOrder(params)"
-      ]
-    });
-
-    // Simulate the async nature of keeper execution
-    return new Promise((resolve) => {
-      setTimeout(() => resolve("0x" + Math.random().toString(16).slice(2)), 1000);
-    });
-  };
+  // 4. Get price as BigInt for order creation
+  const currentPriceBigInt = useMemo(() => {
+    const priceStr = prices[activeIndexToken];
+    return priceStr ? BigInt(priceStr) : 0n;
+  }, [prices, activeIndexToken]);
 
   return {
     prices,
     positions,
     isLoading,
-    ethPrice: formatGmxPrice(prices[CONTRACTS.wnt.toLowerCase()]) || 2855.40,
+    // Price for the selected market's index token
+    ethPrice: currentPrice || 2855.40,
+    currentPriceBigInt,
+    activeIndexToken,
   };
 }

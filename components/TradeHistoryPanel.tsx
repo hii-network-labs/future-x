@@ -25,10 +25,19 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
   // Wait, I need to match the return block safely.
   // Let's rely on the previous tool call context. I will select a range that covers the header.
 
-  const getActionInfo = (trade: any) => {
+    const getActionInfo = (trade: any) => {
     const type = parseInt(trade.orderType);
     const isLong = trade.isLong;
     const event = trade.eventName;
+
+    // DEBUG LOG
+    if (type >= 4 && type <= 6) {
+      console.log(`[TradeHistory] Decrease Trade ${trade.id}:`, {
+         type, isLong, event, 
+         market: trade.marketAddress,
+         collateral: trade.initialCollateralTokenAddress
+      });
+    }
 
     // Default values
     let label = 'Unknown';

@@ -52,8 +52,8 @@ const LPPositionsTable: React.FC<LPPositionsTableProps> = ({ positions, onManage
                   <td className="px-6 py-4 text-right">
                     <button 
                       onClick={() => {
-                        const v = MOCK_VAULTS.find(v => v.id === pos.vaultId);
-                        // Fix: Removed 'as any' casting as MOCK_VAULTS is now properly typed
+                        // Use attached vault if available (Dynamic), else fallback to ID lookup (Mock)
+                        const v = pos.vault || MOCK_VAULTS.find(v => v.id === pos.vaultId);
                         if (v) onManage(v);
                       }}
                       className="text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-black px-4 py-2 rounded transition-all uppercase tracking-widest"
