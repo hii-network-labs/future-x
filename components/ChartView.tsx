@@ -25,9 +25,11 @@ const ChartView: React.FC<ChartViewProps> = ({ price, liqPrice, symbol }) => {
     <div className="w-full h-full bg-[#0C111A] overflow-hidden">
       <iframe 
         src={chartUrl}
-        className="w-full h-full border-none"
+        className="w-full h-full border-none block"
         title="TradingView Chart"
         allow="clipboard-write; fullscreen"
+        scrolling="no"
+        style={{ overflow: 'hidden' }}
       />
     </div>
   );
