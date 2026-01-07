@@ -63,15 +63,33 @@ export interface Vault {
   utilization: number;
   pnl24h: number;
   risk: 'Low' | 'Medium' | 'High';
+  marketData?: Market; // Linked market data for dynamic vaults
 }
 
 export interface LPPosition {
   id: string;
   vaultId: string;
   vaultName: string;
+  vault?: Vault; // Attached vault object for actions
   deposited: number;
   share: number; // percentage
   pnl: number;
   feesEarned: number;
   utilizationExposure: number;
+}
+
+// Market represents a trading pair (e.g., WNT-USD, BTC-USD)
+export interface Market {
+  marketToken: `0x${string}`;     // GM token / market address
+  indexToken: `0x${string}`;      // Token being traded (WNT, BTC)
+  longToken: `0x${string}`;       // Collateral for longs
+  shortToken: `0x${string}`;      // Collateral for shorts (usually USDC)
+  name: string;                    // Display name: "WNT-USD"
+  indexSymbol: string;            // "WNT", "BTC"
+  longSymbol: string;             // "WNT"
+  shortSymbol: string;            // "USDC"
+  indexDecimals?: number;         // Decimals of index token (e.g. 18 for WNT, 8 for BTC)
+  longDecimals?: number;          // Decimals of long token
+  poolValueUsd?: number;          // Total liquidity in USD
+  isActive: boolean;              // Has sufficient liquidity
 }

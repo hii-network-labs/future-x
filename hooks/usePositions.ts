@@ -5,6 +5,7 @@ import { CONTRACTS, getTokenDecimals, formatGmxPrice } from '../constants';
 import { useMetadata } from './useMetadata';
 import { Position, MarketSide } from '../types';
 import { useMemo } from 'react';
+import { useMarketContext } from '../contexts/MarketContext'; 
 
 /**
  * Hook to fetch user positions from Reader contract
@@ -14,6 +15,8 @@ export function usePositions(
   currentEthPrice: number,
   allPrices: Record<string, string> = {}
 ) {
+  const { markets } = useMarketContext();
+
   // Fetch positions from Reader contract
   const { data: positionsData, isLoading, refetch } = useReadContract({
     address: CONTRACTS.reader as `0x${string}`,
@@ -40,6 +43,9 @@ export function usePositions(
     }
 
     return positionsData.map((pos: any, index: number) => {
+      // DEBUG LOGGING
+      // DEBUG LOGGING removed
+
       // Parse position data (30 decimals for USD values)
       const sizeInUsd = Number(formatUnits(pos.numbers.sizeInUsd, 30));
       
@@ -56,10 +62,15 @@ export function usePositions(
       const collateralUsd = collateralAmount * collateralPrice;
 
       const isLong = pos.flags.isLong;
-      
+
+      // Find market to get index token decimals
+      const marketInfo = markets.find(m => m.marketToken.toLowerCase() === pos.addresses.market.toLowerCase());
+      const indexDecimals = marketInfo?.indexDecimals || 18;
+
       // Calculate entry price from position data
-      // Note: sizeInTokens in GMX V2 is also 18 decimals for ETH markets usually
-      const sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, 18));
+      // sizeInTokens in GMX V2 uses the index token's decimals
+      const sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, indexDecimals));
+      
       const entryPrice = sizeInTokens > 0 ? sizeInUsd / sizeInTokens : currentEthPrice;
       
       // Calculate leverage: Size (USD) / Collateral (USD)
@@ -82,10 +93,14 @@ export function usePositions(
       
       // Ensure liqPrice doesn't go negative in UI for Longs
       if (isLong && liqPrice < 0) liqPrice = 0;
+      
+      // Find market object to get correct name
+      const marketName = markets.find(m => m.marketToken.toLowerCase() === pos.addresses.market.toLowerCase())?.name 
+        || getMarketName(pos.addresses.market, pos.addresses.collateralToken);
 
       return {
         id: `pos-${index}`,
-        market: getMarketName(pos.addresses.market, pos.addresses.collateralToken),
+        market: marketName,
         side: isLong ? MarketSide.LONG : MarketSide.SHORT,
         size: sizeInUsd,
         collateral: collateralAmount,
@@ -96,7 +111,7 @@ export function usePositions(
         pnl,
       };
     }).filter(pos => pos.size > 0); // Filter out empty positions
-  }, [positionsData, currentEthPrice]);
+  }, [positionsData, currentEthPrice, markets, allPrices]); // added markets, allPrices dependencies
 
   return {
     positions,

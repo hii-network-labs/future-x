@@ -5,12 +5,14 @@ import PendingOrdersPanel from './PendingOrdersPanel';
 import TradeHistoryPanel from './TradeHistoryPanel';
 import RiskDisclosure from './RiskDisclosure';
 import ChartView from './ChartView';
+import MarketSelector from './MarketSelector';
 import { ChainState, MarketSide, Position, PendingOrder, OrderStatus, OrderType } from '../types';
 import { useGmxProtocol } from '../hooks/useGmxProtocol';
 import { useCreateOrder } from '../hooks/useCreateOrder';
 import { usePositions } from '../hooks/usePositions';
 import { useClosePosition } from '../hooks/useClosePosition';
 import { useTradeHistory } from '../hooks/useTradeHistory';
+import { useMarketContext } from '../contexts/MarketContext';
 import { MOCK_ORDERS } from '../constants';
 import { CONTRACTS } from '../constants';
 import { useMetadata } from '../hooks/useMetadata';
@@ -20,8 +22,15 @@ interface TradeConsoleProps {
   chainState: ChainState;
 }
 
+
 const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
-  const { ethPrice, prices } = useGmxProtocol(chainState.address);
+  const { selectedMarket } = useMarketContext();
+  
+  // Pass selectedMarket's indexToken to get correct price
+  const { ethPrice, prices, currentPriceBigInt } = useGmxProtocol(
+    chainState.address,
+    selectedMarket?.indexToken
+  );
   const { createOrder, isCreating, isConfirmed } = useCreateOrder(chainState.address as `0x${string}`);
   const { closePosition, isClosing } = useClosePosition();
   const { positions: realPositions, isLoading: positionsLoading } = usePositions(
@@ -82,8 +91,13 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
         acceptablePrice: acceptablePrice.toString().slice(0, 20) + '...'
       });
       
-      // Real contract call
+      // Real contract call - use selectedMarket from context
+      const market = selectedMarket?.marketToken || CONTRACTS.market as `0x${string}`;
+      const collateralToken = selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`;
+      
       await createOrder({
+        market,
+        collateralToken,
         sizeDeltaUsd: size,
         collateralAmount: collateral,
         isLong: side === MarketSide.LONG,
@@ -137,9 +151,13 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     toast.loading('Preparing to close position...', { id: 'close-position' });
     
     try {
+      // Use market from position or fall back to selectedMarket
+      const market = selectedMarket?.marketToken || CONTRACTS.market as `0x${string}`;
+      const collateralToken = selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`;
+      
       await closePosition({
-        market: CONTRACTS.market as `0x${string}`,
-        collateralToken: CONTRACTS.usdc as `0x${string}`,
+        market,
+        collateralToken,
         isLong: pos.side === MarketSide.LONG,
         sizeDeltaUsd: pos.size.toString(),
       });
@@ -161,61 +179,67 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       <Toaster position="top-right" />
       
       <div className="col-span-12 xl:col-span-9 space-y-6">
-        <div className="bg-[#111827] border border-gray-800 rounded-xl p-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 items-center">
-            {/* Oracle Price */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
-                <span className="text-sm font-black text-indigo-400">OR</span>
+        {/* Market Stats Header - Compact Single Row */}
+        <div className="bg-[#111827] border border-gray-800 rounded-xl px-4 py-3">
+          <div className="flex items-center justify-between gap-6 overflow-x-auto">
+            {/* Market Selector - Compact */}
+            <MarketSelector className="flex-shrink-0" />
+            
+            {/* Stats Row */}
+            <div className="flex items-center gap-6 flex-1 justify-end">
+              {/* Oracle Price */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                  <span className="text-[10px] font-black text-indigo-400">OR</span>
+                </div>
+                <div>
+                  <div className="text-[9px] text-gray-500 uppercase font-semibold">Oracle</div>
+                  <div className="text-xs font-bold text-white tabular-nums">${ethPrice.toLocaleString()}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Oracle Price</div>
-                <div className="text-sm font-bold text-white tabular-nums">${ethPrice.toLocaleString()}</div>
-              </div>
-            </div>
 
-            {/* Index Price */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <span className="text-sm font-black text-blue-400">IX</span>
+              {/* Index Price */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <span className="text-[10px] font-black text-blue-400">IX</span>
+                </div>
+                <div>
+                  <div className="text-[9px] text-gray-500 uppercase font-semibold">Index</div>
+                  <div className="text-xs font-bold text-white tabular-nums">${ethPrice.toLocaleString()}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Index Price</div>
-                <div className="text-sm font-bold text-white tabular-nums">${ethPrice.toLocaleString()}</div>
-              </div>
-            </div>
 
-            {/* 24h Change */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                <span className="text-sm font-black text-emerald-400">24h</span>
+              {/* 24h Change */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                  <span className="text-[9px] font-black text-emerald-400">24h</span>
+                </div>
+                <div>
+                  <div className="text-[9px] text-gray-500 uppercase font-semibold">Change</div>
+                  <div className="text-xs font-bold text-emerald-400 tabular-nums">+1.84%</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">24H Change</div>
-                <div className="text-sm font-bold text-emerald-400 tabular-nums">+1.84%</div>
-              </div>
-            </div>
 
-            {/* Funding Rate */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-purple-500/10 flex items-center justify-center">
-                <span className="text-sm font-black text-purple-400">FR</span>
+              {/* Funding Rate */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-purple-500/10 flex items-center justify-center">
+                  <span className="text-[10px] font-black text-purple-400">FR</span>
+                </div>
+                <div>
+                  <div className="text-[9px] text-gray-500 uppercase font-semibold">Funding</div>
+                  <div className="text-xs font-bold text-white tabular-nums">0.0008%</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Funding Rate</div>
-                <div className="text-sm font-bold text-white tabular-nums">0.0008% / 1h</div>
-              </div>
-            </div>
 
-            {/* Execution Fee */}
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-                <span className="text-sm font-black text-amber-400">EF</span>
-              </div>
-              <div>
-                <div className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Execution Fee</div>
-                <div className="text-sm font-bold text-white tabular-nums">0.015 HNC</div>
-                <div className="text-[9px] text-gray-600">Keeper</div>
+              {/* Execution Fee */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center">
+                  <span className="text-[10px] font-black text-amber-400">EF</span>
+                </div>
+                <div>
+                  <div className="text-[9px] text-gray-500 uppercase font-semibold">Exec Fee</div>
+                  <div className="text-xs font-bold text-white tabular-nums">0.015 HNC</div>
+                </div>
               </div>
             </div>
           </div>

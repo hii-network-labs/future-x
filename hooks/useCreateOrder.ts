@@ -6,6 +6,8 @@ import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
 
 interface CreateOrderParams {
+  market: `0x${string}`;         // Market address (from selected market)
+  collateralToken: `0x${string}`; // Collateral token (usually shortToken)
   sizeDeltaUsd: number;
   collateralAmount: number;
   isLong: boolean;
@@ -48,8 +50,8 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
           cancellationReceiver: address,
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-          market: CONTRACTS.market as `0x${string}`,
-          initialCollateralToken: CONTRACTS.usdc as `0x${string}`,
+          market: params.market,
+          initialCollateralToken: params.collateralToken,
           swapPath: [] as `0x${string}`[],
         },
         numbers: {

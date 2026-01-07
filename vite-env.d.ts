@@ -16,6 +16,7 @@ interface ImportMetaEnv {
   readonly VITE_DEPOSIT_VAULT: string
   readonly VITE_WITHDRAWAL_VAULT: string
   readonly VITE_MIN_EXECUTION_FEE: string
+  readonly VITE_TRADINGVIEW_URL: string
 }
 
 interface ImportMeta {

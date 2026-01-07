@@ -25,7 +25,11 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
 
   // Hooks
   const { balance: usdcBalance } = useUSDCBalance(address);
-  const { data: liquidityData } = useLiquidity();
+  const { data: liquidityData } = useLiquidity(
+    vault.marketData?.marketToken,
+    vault.marketData?.longToken,
+    vault.marketData?.shortToken
+  );
   const { data: historyData } = useLiquidityHistory(address);
   
   // Destructure isConfirmed and txHash for Toasts
@@ -45,7 +49,8 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   
   // Approval Hook for USDC (Deposit)
   // Approval Hook - Dynamic based on active tab
-  const approvalToken = activeTab === 'add' ? CONTRACTS.usdc : vault.tokenAddress; 
+  const activeSingleToken = vault.marketData?.shortToken || CONTRACTS.usdc; // Default to Short Token (USDC) for deposit
+  const approvalToken = activeTab === 'add' ? activeSingleToken : (vault.marketData?.marketToken || vault.tokenAddress); 
   const decimals = activeTab === 'add' ? 6 : 18;
   const amountBigInt = amount && !isNaN(parseFloat(amount)) ? parseUnits(amount, decimals) : 0n;
 
@@ -112,8 +117,8 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
           return;
         }
         await createDeposit({
-          marketAddress: CONTRACTS.market as `0x${string}`,
-          tokenAddress: CONTRACTS.usdc as `0x${string}`,
+          marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
+          tokenAddress: activeSingleToken as `0x${string}`,
           amount,
           decimals: 6 // USDC
         });
@@ -128,8 +133,8 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
         // 2. WNT Token Approval is not needed for execution fee as it's native.
 
         await createWithdrawal({
-          marketAddress: CONTRACTS.market as `0x${string}`,
-          marketTokenAddress: CONTRACTS.market as `0x${string}`, // GM Token IS the Market contract usually
+          marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
+          marketTokenAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`, // GM Token IS the Market contract usually
           amount,
           decimals: 18 // GM Token
         });

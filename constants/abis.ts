@@ -256,6 +256,114 @@ export const READER_ABI = [
       },
     ],
   },
+  // Get all markets from DataStore
+  {
+    name: 'getMarkets',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dataStore', type: 'address' },
+      { name: 'start', type: 'uint256' },
+      { name: 'end', type: 'uint256' },
+    ],
+    outputs: [
+      {
+        type: 'tuple[]',
+        components: [
+          { name: 'marketToken', type: 'address' },
+          { name: 'indexToken', type: 'address' },
+          { name: 'longToken', type: 'address' },
+          { name: 'shortToken', type: 'address' },
+        ],
+      },
+    ],
+  },
+  // Get single market info
+  {
+    name: 'getMarket',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dataStore', type: 'address' },
+      { name: 'key', type: 'address' },
+    ],
+    outputs: [
+      {
+        type: 'tuple',
+        components: [
+          { name: 'marketToken', type: 'address' },
+          { name: 'indexToken', type: 'address' },
+          { name: 'longToken', type: 'address' },
+          { name: 'shortToken', type: 'address' },
+        ],
+      },
+    ],
+  },
+  // Get market token price (pool value)
+  {
+    name: 'getMarketTokenPrice',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dataStore', type: 'address' },
+      {
+        name: 'market',
+        type: 'tuple',
+        components: [
+          { name: 'marketToken', type: 'address' },
+          { name: 'indexToken', type: 'address' },
+          { name: 'longToken', type: 'address' },
+          { name: 'shortToken', type: 'address' },
+        ],
+      },
+      {
+        name: 'indexTokenPrice',
+        type: 'tuple',
+        components: [
+          { name: 'min', type: 'uint256' },
+          { name: 'max', type: 'uint256' },
+        ],
+      },
+      {
+        name: 'longTokenPrice',
+        type: 'tuple',
+        components: [
+          { name: 'min', type: 'uint256' },
+          { name: 'max', type: 'uint256' },
+        ],
+      },
+      {
+        name: 'shortTokenPrice',
+        type: 'tuple',
+        components: [
+          { name: 'min', type: 'uint256' },
+          { name: 'max', type: 'uint256' },
+        ],
+      },
+      { name: 'pnlFactorType', type: 'bytes32' },
+      { name: 'maximize', type: 'bool' },
+    ],
+    outputs: [
+      { name: '', type: 'int256' },
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'poolValue', type: 'int256' },
+          { name: 'longPnl', type: 'int256' },
+          { name: 'shortPnl', type: 'int256' },
+          { name: 'netPnl', type: 'int256' },
+          { name: 'longTokenAmount', type: 'uint256' },
+          { name: 'shortTokenAmount', type: 'uint256' },
+          { name: 'longTokenUsd', type: 'uint256' },
+          { name: 'shortTokenUsd', type: 'uint256' },
+          { name: 'totalBorrowingFees', type: 'uint256' },
+          { name: 'borrowingFeePoolFactor', type: 'uint256' },
+          { name: 'impactPoolAmount', type: 'uint256' },
+        ],
+      },
+    ],
+  },
   {
     name: 'getMarket',
     type: 'function',
