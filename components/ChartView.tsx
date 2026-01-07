@@ -12,10 +12,14 @@ interface Candle {
 interface ChartViewProps {
   price: number;
   liqPrice: number | null;
+  symbol?: string;
 }
 
-const ChartView: React.FC<ChartViewProps> = ({ price, liqPrice }) => {
-  const chartUrl = import.meta.env.VITE_TRADINGVIEW_URL || 'https://tv-gmx.teknix.dev/';
+const ChartView: React.FC<ChartViewProps> = ({ price, liqPrice, symbol }) => {
+  const baseUrl = import.meta.env.VITE_TRADINGVIEW_URL || 'https://tv-gmx.teknix.dev/';
+  
+  // Append symbol if provided
+  const chartUrl = symbol ? `${baseUrl}?symbol=${symbol}` : baseUrl;
   
   return (
     <div className="w-full h-full bg-[#0C111A] overflow-hidden">

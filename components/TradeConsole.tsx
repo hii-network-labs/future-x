@@ -246,7 +246,11 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
         </div>
 
         <div className="h-[480px] bg-[#111827] border border-gray-800 rounded-xl overflow-hidden relative">
-          <ChartView price={ethPrice} liqPrice={positions.length > 0 ? positions[0].liqPrice : null} />
+          <ChartView 
+            price={ethPrice} 
+            liqPrice={positions.length > 0 ? positions[0].liqPrice : null}
+            symbol={selectedMarket?.indexSymbol} 
+          />
         </div>
 
         <div className="bg-[#111827] border border-gray-800 rounded-xl overflow-hidden">
