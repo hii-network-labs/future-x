@@ -5,7 +5,7 @@ import { MarketSide, Position, PendingOrder, Vault, LPPosition, OrderType, Order
 export const CHAIN_ID = parseInt(import.meta.env.VITE_CHAIN_ID || '22469');
 export const CHAIN_NAME = import.meta.env.VITE_CHAIN_NAME || "Custom GMX";
 export const RPC_URL = import.meta.env.VITE_RPC_URL || "http://115.75.100.60:8545";
-export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://127.0.0.1:9090";
+export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://localhost:9090";
 export const EXPLORER_URL = import.meta.env.VITE_EXPLORER_URL || "https://arbiscan.io";
 export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "http://217.216.75.181:8080";
 
@@ -38,13 +38,26 @@ export const getTokenDecimals = (address: string) => {
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;
 
-// Helper to format 30-decimal GMX prices
+// Helper to format GMX prices (handles both 18-decimal Keeper format and 30-decimal standard)
 export const formatGmxPrice = (priceStr?: string) => {
   if (!priceStr) return 0;
   try {
     const val = BigInt(priceStr);
-    const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
-    return Number(val / divisor) / 100;
+    
+    // Auto-detect format based on magnitude
+    // If value > 1e25, it's likely 30 decimals
+    // If value < 1e25, it's likely 18 decimals (Keeper reduced precision)
+    const threshold = BigInt(10) ** BigInt(25);
+    
+    if (val > threshold) {
+      // Standard GMX 30 decimals
+      const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
+      return Number(val / divisor) / 100;
+    } else {
+      // Keeper reduced precision (18 decimals)
+      const divisor = BigInt(10) ** BigInt(18 - 2);
+      return Number(val / divisor) / 100;
+    }
   } catch {
     return 0;
   }

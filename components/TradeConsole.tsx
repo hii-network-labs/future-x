@@ -85,6 +85,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
         collateralToken,
         sizeDeltaUsd: size,
         collateralAmount: collateral,
+        currentPrice: ethPrice, // Pass current ETH price for USD->ETH conversion
         isLong: side === MarketSide.LONG,
         acceptablePrice,
       });

@@ -43,9 +43,6 @@ export function usePositions(
     }
 
     return positionsData.map((pos: any, index: number) => {
-      // DEBUG LOGGING
-      // DEBUG LOGGING removed
-
       // Parse position data (30 decimals for USD values)
       const sizeInUsd = Number(formatUnits(pos.numbers.sizeInUsd, 30));
       
@@ -55,17 +52,49 @@ export function usePositions(
       const collateralAmount = Number(formatUnits(pos.numbers.collateralAmount, collateralDecimals));
       const collateralSymbol = getTokenSymbol(collateralTokenAddress);
 
-      // Get collateral price in USD
-      const rawCollateralPrice = allPrices[collateralTokenAddress] || 
+      // Get collateral price in USD (case-insensitive lookup)
+      const collateralPriceEntry = Object.entries(allPrices).find(
+        ([addr]) => addr.toLowerCase() === collateralTokenAddress
+      );
+      const rawCollateralPrice = collateralPriceEntry?.[1] || 
         (collateralTokenAddress === CONTRACTS.usdc.toLowerCase() ? "1000000000000000000000000000000" : "0");
       const collateralPrice = formatGmxPrice(rawCollateralPrice) || (collateralTokenAddress === CONTRACTS.usdc.toLowerCase() ? 1 : currentEthPrice);
       const collateralUsd = collateralAmount * collateralPrice;
+
+      // 🔍 DEBUG: Collateral Price Lookup
+      console.log(`[Position #${index}] Collateral Price Debug:`, {
+        collateralToken: collateralTokenAddress.slice(0, 10) + '...',
+        allPricesKeys: Object.keys(allPrices).map(k => k.slice(0, 10) + '...'),
+        foundEntry: collateralPriceEntry ? `${collateralPriceEntry[0].slice(0, 10)}... = ${collateralPriceEntry[1]}` : 'NOT FOUND',
+        rawPrice: rawCollateralPrice,
+        formattedPrice: formatGmxPrice(rawCollateralPrice),
+        finalPrice: collateralPrice,
+        collateralAmount,
+        collateralUsd,
+        currentEthPriceFallback: currentEthPrice,
+      });
 
       const isLong = pos.flags.isLong;
 
       // Find market to get index token decimals
       const marketInfo = markets.find(m => m.marketToken.toLowerCase() === pos.addresses.market.toLowerCase());
-      const indexDecimals = marketInfo?.indexDecimals || 18;
+      
+      // CRITICAL FIX: sizeInTokens ALWAYS uses index token decimals (WNT = 18)
+      // NOT collateral token decimals!
+      // For WNT-USDC market: index token is WNT (18 decimals) for both LONG and SHORT
+      const indexTokenAddress = marketInfo?.indexToken || CONTRACTS.wnt;
+      const indexDecimals = getTokenDecimals(indexTokenAddress);
+      
+      // Debug: Log what decimals we're using
+      console.log(`[Position #${index}] Index Token Config:`, {
+        market: pos.addresses.market.slice(0, 10) + '...',
+        isLong,
+        indexToken: indexTokenAddress.slice(0, 10) + '...',
+        indexDecimals,
+        collateralToken: collateralTokenAddress.slice(0, 10) + '...',
+        collateralDecimals,
+        marketInfo: marketInfo ? 'found' : 'not found',
+      });
 
       // Calculate entry price from position data
       // sizeInTokens in GMX V2 uses the index token's decimals
@@ -73,8 +102,46 @@ export function usePositions(
       
       const entryPrice = sizeInTokens > 0 ? sizeInUsd / sizeInTokens : currentEthPrice;
       
+      // 📊 ENTRY PRICE DEBUG LOGGING
+      console.log(`[Position #${index}] Entry Price Calculation:`, {
+        side: isLong ? 'LONG' : 'SHORT',
+        market: pos.addresses.market.slice(0, 10) + '...',
+        rawData: {
+          sizeInUsd_raw: pos.numbers.sizeInUsd.toString(),
+          sizeInTokens_raw: pos.numbers.sizeInTokens.toString(),
+          collateralAmount_raw: pos.numbers.collateralAmount.toString(),
+        },
+        parsed: {
+          sizeInUsd: sizeInUsd.toFixed(2),
+          sizeInTokens: sizeInTokens.toFixed(6),
+          indexDecimals,
+          collateralAmount: collateralAmount.toFixed(6),
+          collateralDecimals,
+        },
+        prices: {
+          entryPrice: entryPrice.toFixed(2),
+          currentPrice: currentEthPrice.toFixed(2),
+          collateralPrice: collateralPrice.toFixed(2),
+        },
+        calculation: {
+          formula: 'sizeInUsd / sizeInTokens',
+          numerator: sizeInUsd,
+          denominator: sizeInTokens,
+          result: entryPrice,
+        }
+      });
+      
       // Calculate leverage: Size (USD) / Collateral (USD)
       const leverage = collateralUsd > 0 ? sizeInUsd / collateralUsd : 0;
+      
+      // 🔍 DEBUG: Leverage Calculation
+      console.log(`[Position #${index}] Leverage Calculation:`, {
+        sizeInUsd,
+        collateralUsd,
+        leverage,
+        leverageFormatted: leverage.toFixed(2) + 'X',
+        isLong,
+      });
       
       // Calculate PnL
       const priceDiff = currentEthPrice - entryPrice;
@@ -98,18 +165,23 @@ export function usePositions(
       const marketName = markets.find(m => m.marketToken.toLowerCase() === pos.addresses.market.toLowerCase())?.name 
         || getMarketName(pos.addresses.market, pos.addresses.collateralToken);
 
-      return {
+      const position = {
         id: `pos-${index}`,
         market: marketName,
         side: isLong ? MarketSide.LONG : MarketSide.SHORT,
         size: sizeInUsd,
-        collateral: collateralAmount,
+        collateral: collateralUsd,  // USD value instead of token amount
         entryPrice,
         markPrice: currentEthPrice,
         leverage: parseFloat(leverage.toFixed(2)),
         liqPrice,
         pnl,
       };
+
+      // 📋 FINAL POSITION OBJECT
+      console.log(`[Position #${index}] Final Position Object:`, position);
+
+      return position;
     }).filter(pos => pos.size > 0); // Filter out empty positions
   }, [positionsData, currentEthPrice, markets, allPrices]); // added markets, allPrices dependencies
 

@@ -41,7 +41,7 @@ export const useClosePosition = () => {
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           market: params.market,
-          initialCollateralToken: params.collateralToken,
+          initialCollateralToken: params.isLong ? (CONTRACTS.wnt as `0x${string}`) : params.collateralToken, // Use WNT for Long
           swapPath: [] as `0x${string}`[],
         },
         numbers: {
@@ -59,7 +59,7 @@ export const useClosePosition = () => {
         orderType: 4, // MarketDecrease = 4
         decreasePositionSwapType: 0, // NoSwap
         isLong: params.isLong,
-        shouldUnwrapNativeToken: false,
+        shouldUnwrapNativeToken: params.isLong, // Unwrap for Long positions
         referralCode: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         autoCancel: false,
         dataList: [] as `0x${string}`[],

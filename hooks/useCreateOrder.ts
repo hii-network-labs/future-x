@@ -9,7 +9,8 @@ interface CreateOrderParams {
   market: `0x${string}`;         // Market address (from selected market)
   collateralToken: `0x${string}`; // Collateral token (usually shortToken)
   sizeDeltaUsd: number;
-  collateralAmount: number;
+  collateralAmount: number;      // Collateral in USD
+  currentPrice: number;          // Current ETH price for USD->ETH conversion
   isLong: boolean;
   acceptablePrice: bigint;
 }
@@ -50,8 +51,8 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
           cancellationReceiver: address,
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-          market: params.market,
-          initialCollateralToken: params.collateralToken,
+          market: params.market, // Usually matches the market address
+          initialCollateralToken: params.isLong ? (CONTRACTS.wnt as `0x${string}`) : params.collateralToken, // Force WNT for Long
           swapPath: [] as `0x${string}`[],
         },
         numbers: {
@@ -67,22 +68,43 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         orderType: 2, // Market Increase
         decreasePositionSwapType: 0,
         isLong: params.isLong,
-        shouldUnwrapNativeToken: false,
+        shouldUnwrapNativeToken: params.isLong, // Unwrap WNT for Longs (if user sends ETH)
         autoCancel: false,
         referralCode: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         dataList: [] as `0x${string}`[],
       };
 
       // Encode multicall functions
-      const calls = [
-        // 1. Send WNT (wrapped ETH) for execution fee
-        encodeFunctionData({
+      const calls: `0x${string}`[] = [];
+      let totalValue = executionFee;
+
+      // 1. Send WNT (wrapped ETH) for execution fee
+      calls.push(encodeFunctionData({
+        abi: MULTICALL_ABI,
+        functionName: 'sendWnt',
+        args: [CONTRACTS.orderVault as `0x${string}`, executionFee],
+      }));
+
+      // 2. Send Collateral
+      if (params.isLong) {
+        // For Long, we use ETH (WNT) as collateral
+        // User inputs collateral in USD, we need to convert to ETH amount
+        const collateralInEth = params.collateralAmount / params.currentPrice; // USD / (USD/ETH) = ETH
+        const wntCollateralAmount = parseUnits(collateralInEth.toFixed(18), 18); // ETH decimals
+        
+        // Update params with correct WNT amount
+        orderParams.numbers.initialCollateralDeltaAmount = wntCollateralAmount;
+
+        calls.push(encodeFunctionData({
           abi: MULTICALL_ABI,
           functionName: 'sendWnt',
-          args: [CONTRACTS.orderVault as `0x${string}`, executionFee],
-        }),
-        // 2. Send USDC collateral to OrderVault
-        encodeFunctionData({
+          args: [CONTRACTS.orderVault as `0x${string}`, wntCollateralAmount],
+        }));
+        
+        totalValue += wntCollateralAmount;
+      } else {
+        // For Short, we use USDC (standard logic)
+        calls.push(encodeFunctionData({
           abi: MULTICALL_ABI,
           functionName: 'sendTokens',
           args: [
@@ -90,49 +112,40 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
             CONTRACTS.orderVault as `0x${string}`,
             collateralDeltaAmount,
           ],
-        }),
-        // 3. Create the order
-        encodeFunctionData({
-          abi: MULTICALL_ABI,
-          functionName: 'createOrder',
-          args: [orderParams],
-        }),
-      ];
+        }));
+      }
+
+      // 3. Create the order
+      calls.push(encodeFunctionData({
+        abi: MULTICALL_ABI,
+        functionName: 'createOrder',
+        args: [orderParams],
+      }));
 
       console.log('📤 Creating order with params:', {
-        market: CONTRACTS.market,
-        collateral: params.collateralAmount,
+        market: params.market,
+        collateralToken: orderParams.addresses.initialCollateralToken,
+        collateralAmount: orderParams.numbers.initialCollateralDeltaAmount,
         size: params.sizeDeltaUsd,
         isLong: params.isLong,
-        executionFee: FEES.minExecutionFee,
+        totalValue,
       });
 
-      // SAFETY CHECK: Verify Allowance Logic
-      // Ensure the ExchangeRouter has permission to spend user's collateral
-      try {
-        if (publicClient) {
-          const allowance = await publicClient.readContract({
-            address: params.collateralToken,
-            abi: [{
-              name: 'allowance',
-              type: 'function',
-              stateMutability: 'view',
-              inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
-              outputs: [{ name: '', type: 'uint256' }]
-            }],
+      // SAFETY CHECK: Verify Allowance Logic (only for USDC/Short)
+      if (!params.isLong && publicClient) {
+        // ... (Keep existing allowance logic but simpler reference)
+         // @ts-ignore
+         const allowance = await publicClient.readContract({
+            address: CONTRACTS.usdc as `0x${string}`, // Force USDC address for Short check
+            abi: [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }] as const,
             functionName: 'allowance',
-            args: [address, CONTRACTS.router as `0x${string}`], // Fix: Check against Router
+            args: [address, CONTRACTS.router as `0x${string}`],
           }) as bigint;
 
-          console.log(`Checking allowance: ${allowance.toString()} >= ${collateralDeltaAmount.toString()}`);
-
           if (allowance < collateralDeltaAmount) {
-            toast.error('Insufficient allowance! Please approve USDC.');
-            throw new Error('Insufficient allowance. Please approve USDC first.');
+             toast.error('Insufficient allowance! Please approve USDC.');
+             throw new Error('Insufficient allowance.');
           }
-        }
-      } catch (err) {
-        console.warn('Allowance check failed, proceeding anyway but tx implies it might revert:', err);
       }
 
       // Send multicall transaction
@@ -142,7 +155,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         abi: MULTICALL_ABI,
         functionName: 'multicall',
         args: [calls],
-        value: executionFee, // Send ETH for execution fee
+        value: totalValue, // Send ExecutionFee + Collateral (if ETH)
         chain: config.chains.find(c => c.id === CHAIN_ID),
       });
 
