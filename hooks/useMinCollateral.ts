@@ -45,12 +45,12 @@ export function useMinCollateral() {
     : 10; // Fallback to $10 if query fails
 
   // Debug log
-  console.log('[useMinCollateral] DataStore MIN_COLLATERAL_USD:', {
-    raw: minCollateralRaw?.toString(),
-    usd: minCollateralUsd,
-    isLoading,
-    error: error?.message,
-  });
+  // console.log('[useMinCollateral] DataStore MIN_COLLATERAL_USD:', {
+  //   raw: minCollateralRaw?.toString(),
+  //   usd: minCollateralUsd,
+  //   isLoading,
+  //   error: error?.message,
+  // });
 
   return {
     minCollateralUsd,
