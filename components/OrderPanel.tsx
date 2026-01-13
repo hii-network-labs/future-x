@@ -200,7 +200,18 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
         <div className="bg-gray-900/40 rounded-lg p-4 space-y-2 border border-gray-800/50">
           <DetailRow label="Position Size" value={`$${sizeUSD.toLocaleString()}`} />
           <DetailRow label="Entry Price" value={`$${currentPrice.toLocaleString()}`} />
-          <DetailRow label="Liq. Price" value={`$${(side === MarketSide.LONG ? currentPrice * 0.82 : currentPrice * 1.18).toFixed(2)}`} warning={leverage > 20} />
+          <DetailRow 
+            label="Liq. Price" 
+            value={`$${
+              leverage > 0
+                ? (side === MarketSide.LONG 
+                    ? currentPrice * (1 - (1 / leverage) * 0.9)  // 90% of max loss before liquidation
+                    : currentPrice * (1 + (1 / leverage) * 0.9)
+                  ).toFixed(2)
+                : 'N/A'
+            }`} 
+            warning={leverage > 20} 
+          />
           <DetailRow label="Slippage Tolerance" value="0.30%" />
           <div className="pt-2 border-t border-gray-800 mt-2">
             <DetailRow label="Execution Fee" value={`${keeperFee} HNC`} highlight />
