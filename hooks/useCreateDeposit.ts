@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { useWalletClient, useWaitForTransactionReceipt } from 'wagmi';
+import { useWalletClient, useWaitForTransactionReceipt, usePublicClient } from 'wagmi';
 import { encodeFunctionData, parseUnits, type Hex } from 'viem';
 import { MULTICALL_ABI } from '../constants/abis';
 import { CONTRACTS, FEES } from '../constants';
 import toast from 'react-hot-toast';
+import { estimateExecutionFee, GAS_LIMITS, formatExecutionFee } from '../utils/gasUtils';
 
 interface CreateDepositParams {
   marketAddress: `0x${string}`;
@@ -25,6 +26,10 @@ export function useCreateDeposit(address: `0x${string}` | undefined) {
     hash: txHash,
   });
 
+  // Fetch current gas price
+  // Using publicClient to fetch latest is safer for the exact moment of click.
+  const publicClient = usePublicClient();
+
   const createDeposit = async (params: CreateDepositParams) => {
     if (!walletClient || !address) {
       toast.error('Wallet not connected');
@@ -36,7 +41,19 @@ export function useCreateDeposit(address: `0x${string}` | undefined) {
     try {
       // 1. Parse amounts
       const amountBigInt = parseUnits(params.amount, params.decimals);
-      const executionFee = parseUnits(FEES.minExecutionFee, 18); // ETH decimals
+      
+      // Dynamic Fee Calculation
+      let executionFee = parseUnits(FEES.minExecutionFee, 18); // Default Fallback
+      
+      try {
+          if (publicClient) {
+            const gasPrice = await publicClient.getGasPrice();
+            executionFee = estimateExecutionFee(gasPrice, GAS_LIMITS.DEPOSIT);
+            console.log(`⛽ Dynamic Fee: ${formatExecutionFee(executionFee)} (Gas: ${gasPrice.toString()})`);
+          }
+      } catch (err) {
+          console.warn('⚠️ Failed to fetch gas price, using default fee:', err);
+      }
 
       // 2. Build CreateDepositParams
       // FIXED: Uses FLAT structure matching ExchangeRouter ABI (NOT nested numbers/addresses like createOrder)

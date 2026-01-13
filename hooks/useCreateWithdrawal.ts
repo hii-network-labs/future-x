@@ -4,6 +4,7 @@ import { encodeFunctionData, parseUnits, type Hex } from 'viem';
 import { MULTICALL_ABI, WETH_ABI, ERC20_ABI } from '../constants/abis';
 import { CONTRACTS, FEES } from '../constants';
 import toast from 'react-hot-toast';
+import { estimateExecutionFee, GAS_LIMITS, formatExecutionFee } from '../utils/gasUtils';
 
 interface CreateWithdrawalParams {
   marketAddress: `0x${string}`;
@@ -38,7 +39,17 @@ export function useCreateWithdrawal(address: `0x${string}` | undefined) {
     try {
       // 1. Parse amounts
       const amountBigInt = parseUnits(params.amount, params.decimals);
-      const executionFee = parseUnits(FEES.minExecutionFee, 18);
+      
+      let executionFee = parseUnits(FEES.minExecutionFee, 18);
+      try {
+        if (publicClient) {
+          const gasPrice = await publicClient.getGasPrice();
+          executionFee = estimateExecutionFee(gasPrice, GAS_LIMITS.WITHDRAWAL); // Uses 2M Benchmark
+          console.log(`⛽ Withdrawal Fee: ${formatExecutionFee(executionFee)}`);
+        }
+      } catch (err) {
+        console.warn('Using default fee:', err);
+      }
 
       // 2. Build CreateWithdrawalParams
       const withdrawalParams = {
@@ -54,7 +65,7 @@ export function useCreateWithdrawal(address: `0x${string}` | undefined) {
         minShortTokenAmount: 0n,
         shouldUnwrapNativeToken: true, // Unwrap WNT to native ETH
         executionFee,
-        callbackGasLimit: 200000n,
+        callbackGasLimit: 2000000n, // Increased to 2M to prevent silent OOG
         dataList: [] as `0x${string}`[],
       };
 
