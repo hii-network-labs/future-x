@@ -4,6 +4,7 @@ import { encodeFunctionData, parseUnits, type Hex } from 'viem';
 import { MULTICALL_ABI } from '../constants/abis';
 import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
+import { estimateExecutionFee, GAS_LIMITS, formatExecutionFee } from '../utils/gasUtils';
 
 interface CreateOrderParams {
   market: `0x${string}`;         // Market address (from selected market)
@@ -42,7 +43,20 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
       // Convert to proper units
       const sizeDeltaUsd = parseUnits(params.sizeDeltaUsd.toString(), 30); // GMX uses 30 decimals for USD
       const collateralDeltaAmount = parseUnits(params.collateralAmount.toString(), 6); // USDC decimals
-      const executionFee = parseUnits(FEES.minExecutionFee, 18); // ETH decimals
+      
+      let executionFee = parseUnits(FEES.minExecutionFee, 18);
+      let callbackGasLimit = 0n; // Default auto
+      
+      try {
+        if (publicClient) {
+          const gasPrice = await publicClient.getGasPrice();
+          executionFee = estimateExecutionFee(gasPrice, GAS_LIMITS.ORDER);
+          callbackGasLimit = GAS_LIMITS.ORDER; // Set explicit limit equal to benchmark
+          console.log(`⛽ Order Fee: ${formatExecutionFee(executionFee)} (Limit: ${callbackGasLimit})`);
+        }
+      } catch (err) {
+        console.warn('Using default fee:', err);
+      }
 
       // Build order params structure (matching GMX V2 contract)
       const orderParams = {
@@ -61,7 +75,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
           triggerPrice: 0n,
           acceptablePrice: params.acceptablePrice,
           executionFee,
-          callbackGasLimit: 0n,
+          callbackGasLimit,
           minOutputAmount: 0n,
           validFromTime: 0n,
         },
