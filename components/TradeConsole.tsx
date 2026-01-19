@@ -42,6 +42,26 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions');
   const [historyPage, setHistoryPage] = useState(1);
+  const [side, setSide] = useState<MarketSide>(MarketSide.LONG);
+
+  // Dynamic Collateral Token Logic
+  // Long -> Use market.longToken. IF WNT -> Use Native ETH
+  // Short -> Use market.shortToken (e.g. USDC)
+  
+  const isWntLong = side === MarketSide.LONG && 
+    (selectedMarket?.longToken.toLowerCase() === CONTRACTS.wnt.toLowerCase());
+
+  const collateralTokenAddress = isWntLong
+    ? undefined // Use Native ETH
+    : (side === MarketSide.LONG 
+        ? (selectedMarket?.longToken || CONTRACTS.wnt) 
+        : (selectedMarket?.shortToken || CONTRACTS.usdc));
+
+  const collateralTokenSymbol = isWntLong
+    ? 'HNC'
+    : (side === MarketSide.LONG
+        ? (selectedMarket?.longSymbol || 'WNT') 
+        : (selectedMarket?.shortSymbol || 'USDC'));
   
   // Hooks with pagination
   const { data: tradeHistory = [], isLoading: historyLoading, totalPages, total } = useTradeHistory(chainState.address, historyPage, 10);
@@ -117,9 +137,9 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     toast.loading('Preparing to close position...', { id: 'close-position' });
     
     try {
-      // Use market from position or fall back to selectedMarket
-      const market = selectedMarket?.marketToken || CONTRACTS.market as `0x${string}`;
-      const collateralToken = selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`;
+      // FIX: Use position's own market and collateral token, NOT the selected market
+      const market = pos.marketAddress;
+      const collateralToken = pos.collateralToken;
       
       await closePosition({
         market,
@@ -289,8 +309,10 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
           onOpenOrder={handleOpenOrder} 
           isWalletConnected={chainState.isConnected}
           isCreatingOrder={isCreating}
-          collateralTokenAddress={selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`}
-          collateralTokenSymbol={selectedMarket?.shortSymbol || 'USDC'}
+          collateralTokenAddress={collateralTokenAddress as `0x${string}`}
+          collateralTokenSymbol={collateralTokenSymbol}
+          side={side}
+          onSideChange={setSide}
         />
         <RiskDisclosure />
       </div>

@@ -11,6 +11,9 @@ interface CreateDepositParams {
   tokenAddress: `0x${string}`; // Token being deposited (e.g. USDC)
   amount: string; // User input string "100.5"
   decimals: number;
+  // New: Pass the market's actual long/short tokens
+  longToken?: `0x${string}`;
+  shortToken?: `0x${string}`;
 }
 
 /**
@@ -56,24 +59,26 @@ export function useCreateDeposit(address: `0x${string}` | undefined) {
       }
 
       // 2. Build CreateDepositParams
-      // FIXED: Uses FLAT structure matching ExchangeRouter ABI (NOT nested numbers/addresses like createOrder)
+      // Use the market's actual long/short tokens (defaults to WNT/USDC if not provided)
+      const initialLongToken = params.longToken || CONTRACTS.wnt as `0x${string}`;
+      const initialShortToken = params.shortToken || params.tokenAddress;
+      
+      console.log('📤 Deposit Tokens:', {
+        market: params.marketAddress,
+        initialLongToken,
+        initialShortToken,
+        depositToken: params.tokenAddress,
+      });
+
       const depositParams = {
         addresses: {
           receiver: address,
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
-          // Note: If depositing USDC, it usually goes to Short Token? 
-          // For GMX V2 w/ Single Token Pools (or standard pools), we specify BOTH initialLong and initialShort usually.
-          // BUT if we are only depositing ONE token, the other is zero address?
-          // Let's check script: it sets initialLong: WNT, initialShort: USDC.
-          // If we deposit USDC, we should set initialShortToken = USDC, initialLongToken = WNT (or zero address?)
-          // For simplicity, let's assume we are depositing into the Short side (USDC) if it's a stablecoin vault.
-          // If params.tokenAddress is USDC, it is initialShortToken.
-          // However, to keep it generic, we need to know the market structure. 
-          // For now, let's put it in *both* if valid? No.
           market: params.marketAddress,
-          initialLongToken: CONTRACTS.wnt as `0x${string}`, // Must match market's Long Token (WNT/ETH)
-          initialShortToken: params.tokenAddress, // USDC is usually the short token
+          initialLongToken,
+          initialShortToken,
+          // IMPORTANT: Empty swap paths = no swap, deposit token directly
           longTokenSwapPath: [] as `0x${string}`[],
           shortTokenSwapPath: [] as `0x${string}`[],
         },

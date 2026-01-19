@@ -1,13 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { ChainState, Vault } from '../types';
-import { MOCK_VAULTS, CONTRACTS } from '../constants';
+import { ChainState, Vault, LPPosition } from '../types';
+import { CONTRACTS } from '../constants';
 import VaultCard from './Liquidity/VaultCard';
 import VaultDrawer from './Liquidity/VaultDrawer';
 import LPPositionsTable from './Liquidity/LPPositionsTable';
 import LPRiskDisclosure from './Liquidity/LPRiskDisclosure';
 import { useLiquidity } from '../hooks/useLiquidity';
 import { useMarkets } from '../hooks/useMarkets';
-import { useAccount } from 'wagmi';
+import { useAccount, useReadContracts } from 'wagmi';
+import { ERC20_ABI } from '../constants/abis';
+import { formatUnits } from 'viem';
+import { usePrices } from '../hooks/usePrices';
 
 interface LiquidityConsoleProps {
   chainState: ChainState;
@@ -17,12 +20,99 @@ const LiquidityConsole: React.FC<LiquidityConsoleProps> = ({ chainState }) => {
   const { address } = useAccount();
   const [selectedVault, setSelectedVault] = useState<Vault | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { getPrice } = usePrices();
   
   // Fetch markets
   const { markets } = useMarkets();
   
-  // Fetch default liquidity data (for header stats - assumes first market or WNT-USD)
+  // Fetch default liquidity data (for header stats)
   const { data: defaultLiquidityData, refetch } = useLiquidity();
+
+  // Fetch GM token balances for ALL markets
+  const gmBalanceContracts = useMemo(() => {
+    if (!address || markets.length === 0) return [];
+    return markets.flatMap(market => [
+      {
+        address: market.marketToken as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [address],
+      },
+      {
+        address: market.marketToken as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'totalSupply',
+      },
+      {
+        address: market.marketToken as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'decimals',
+      },
+    ]);
+  }, [address, markets]);
+
+  const { data: gmBalanceData, isLoading: balancesLoading } = useReadContracts({
+    contracts: gmBalanceContracts,
+    query: {
+      enabled: gmBalanceContracts.length > 0,
+      refetchInterval: 10000,
+    }
+  });
+
+  // Build LP positions for all markets with non-zero balance
+  const lpPositions = useMemo<LPPosition[]>(() => {
+    if (!gmBalanceData || markets.length === 0) return [];
+    
+    const positions: LPPosition[] = [];
+    
+    markets.forEach((market, index) => {
+      const balanceResult = gmBalanceData[index * 3];
+      const totalSupplyResult = gmBalanceData[index * 3 + 1];
+      const decimalsResult = gmBalanceData[index * 3 + 2];
+      
+      const balance = balanceResult?.result as bigint || 0n;
+      const totalSupply = totalSupplyResult?.result as bigint || 0n;
+      const decimals = decimalsResult?.result as number || 18;
+      
+      if (balance > 0n) {
+        const balanceFormatted = parseFloat(formatUnits(balance, decimals));
+        const sharePercentage = totalSupply > 0n 
+          ? (Number(balance) * 100 / Number(totalSupply))
+          : 0;
+        
+        // Estimate USD value based on pool TVL
+        const poolValueUsd = market.poolValueUsd || 0;
+        const depositedUsd = totalSupply > 0n 
+          ? (Number(balance) / Number(totalSupply)) * poolValueUsd
+          : 0;
+        
+        positions.push({
+          id: `lp-${market.marketToken}`,
+          vaultId: market.marketToken,
+          vaultName: `${market.indexSymbol || market.name} Vault`,
+          deposited: balanceFormatted,
+          share: sharePercentage,
+          pnl: 0, // Would need historical data
+          feesEarned: 0, // Would need historical data
+          utilizationExposure: 50, // Mock
+          vault: {
+            id: `vault-${market.marketToken}`,
+            name: `${market.indexSymbol} Vault`,
+            token: 'GM',
+            tokenAddress: market.marketToken,
+            markets: [market.name],
+            totalLiquidity: poolValueUsd,
+            utilization: 50,
+            pnl24h: 0,
+            risk: 'Medium',
+            marketData: market
+          }
+        });
+      }
+    });
+    
+    return positions;
+  }, [gmBalanceData, markets]);
 
   const handleSelectVault = (vault: Vault) => {
     setSelectedVault(vault);
@@ -31,24 +121,33 @@ const LiquidityConsole: React.FC<LiquidityConsoleProps> = ({ chainState }) => {
 
   // Map markets to Vault objects
   const vaults = useMemo<Vault[]>(() => {
-    return markets.map((market, index) => ({
+    return markets.map((market) => ({
       id: `vault-${market.marketToken}`,
       name: `${market.indexSymbol} Vault`,
-      token: 'GM', // GM Token
+      token: 'GM',
       tokenAddress: market.marketToken,
       markets: [market.name],
-      totalLiquidity: 0, // TODO: Fetch per-market TVL effectively
-      utilization: 50, // Mock
+      totalLiquidity: market.poolValueUsd || 0,
+      utilization: 50,
       pnl24h: 0,
       risk: 'Medium',
       marketData: market
     }));
   }, [markets]);
 
-  // Use dynamic vaults or fallback to mock if no markets loaded yet (though useMarkets defaults to empty array)
   const displayVaults = vaults.length > 0 ? vaults : [];
 
-  const realizedFees = '0.00' // Placeholder
+  // Calculate total deposited USD across all positions
+  const totalDepositedUsd = useMemo(() => {
+    return lpPositions.reduce((sum, pos) => {
+      const vault = pos.vault;
+      if (vault && vault.totalLiquidity > 0) {
+        const usd = (pos.deposited / (vault.totalLiquidity / (getPrice(vault.marketData?.longToken || '') || 1))) * vault.totalLiquidity || pos.deposited;
+        return sum + (pos.vault?.totalLiquidity ? (pos.share / 100) * pos.vault.totalLiquidity : 0);
+      }
+      return sum;
+    }, 0);
+  }, [lpPositions, getPrice]);
 
   return (
     <div className="space-y-8 relative">
@@ -61,14 +160,13 @@ const LiquidityConsole: React.FC<LiquidityConsoleProps> = ({ chainState }) => {
         
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <TopStat label="Total TVL" value={`$${defaultLiquidityData?.marketTvlUsd || '0'}`} />
-          <TopStat label="Avg. Utilization" value="~50%" />
-          {/* Refresh Button Integration */}
+          <TopStat label="Your Positions" value={lpPositions.length.toString()} />
           <div className="bg-[#111827] border border-gray-800 rounded-lg p-3 min-w-[120px] relative group cursor-pointer hover:border-gray-700 transition-colors" onClick={() => refetch()}>
              <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider flex items-center justify-between">
-               Your Balance (WNT)
-               <svg className={`w-3 h-3 text-gray-600 group-hover:text-emerald-500 transition-transform ${!defaultLiquidityData ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+               Total Deposited
+               <svg className={`w-3 h-3 text-gray-600 group-hover:text-emerald-500 transition-transform ${balancesLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
              </span>
-             <div className="text-base font-bold text-emerald-400">{defaultLiquidityData?.userGmBalance || '0.00'} GM</div>
+             <div className="text-base font-bold text-emerald-400">${totalDepositedUsd.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
           </div>
           <TopStat label="Vaults Active" value={markets.length.toString()} />
         </div>
@@ -97,27 +195,17 @@ const LiquidityConsole: React.FC<LiquidityConsoleProps> = ({ chainState }) => {
             </div>
           </section>
 
-          {/* User Positions - Simplified for now, just shows default market pos */}
+          {/* User Positions - Now shows ALL markets */}
           <section>
-            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Your Liquidity Positions (Default Market)</h2>
-            {parseFloat(defaultLiquidityData?.userGmBalance || '0') > 0 ? (
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Your Liquidity Positions</h2>
+            {lpPositions.length > 0 ? (
                <LPPositionsTable 
-                 positions={[{
-                   id: 'lp-real',
-                   vaultId: 'default',
-                   vaultName: 'WNT-USD Vault',
-                   deposited: parseFloat(defaultLiquidityData?.userGmBalance || '0'),
-                   share: parseFloat(defaultLiquidityData?.sharePercentage || '0'), 
-                   pnl: 0, 
-                   feesEarned: parseFloat(realizedFees),
-                   utilizationExposure: 50,
-                   vault: displayVaults[0] // Attach the vault specific to this position
-                 }]} 
+                 positions={lpPositions} 
                  onManage={handleSelectVault} 
                />
             ) : (
               <div className="p-8 text-center border border-dashed border-gray-800 rounded-xl text-gray-500 text-sm">
-                No active liquidity positions found in WNT-USD vault.
+                {balancesLoading ? 'Loading positions...' : 'No active liquidity positions found in any vault.'}
               </div>
             )}
           </section>
@@ -152,3 +240,4 @@ const TopStat: React.FC<{ label: string, value: string, color?: string }> = ({ l
 );
 
 export default LiquidityConsole;
+

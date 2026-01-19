@@ -41,7 +41,9 @@ export const useClosePosition = () => {
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           market: params.market,
-          initialCollateralToken: params.isLong ? (CONTRACTS.wnt as `0x${string}`) : params.collateralToken, // Use WNT for Long
+          // FIX: Use the position's actual collateral token, not hardcoded WNT
+          // GMX Long uses USDC collateral, WNT Long uses WNT collateral
+          initialCollateralToken: params.collateralToken,
           swapPath: [] as `0x${string}`[],
         },
         numbers: {

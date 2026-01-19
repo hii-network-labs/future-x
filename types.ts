@@ -18,6 +18,8 @@ export enum OrderType {
 export interface Position {
   id: string;
   market: string;
+  marketAddress: `0x${string}`; // Added for closing actions
+  collateralToken: `0x${string}`; // Added for closing actions
   side: MarketSide;
   size: number; // USD
   collateral: number; // USD

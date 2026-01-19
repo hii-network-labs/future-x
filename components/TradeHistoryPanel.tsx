@@ -163,15 +163,99 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
             <tbody className="divide-y divide-gray-800">
               {trades.map((trade) => {
                 const action = getActionInfo(trade);
-                // PnL and Size use 30 decimals
-                const sizeDeltaUsd = trade.sizeDeltaUsd ? Number(formatUnits(BigInt(trade.sizeDeltaUsd), 30)) : 0;
-                const pnlUsd = trade.pnlUsd ? Number(formatUnits(BigInt(trade.pnlUsd), 30)) : 0;
                 
-                // executionPrice in this subgraph appears to use 12 decimals (e.g. 5000*10^12 for 5000 USD)
-                // Standard GMX is 30, but empirical data shows 12 here.
-                const executionPrice = trade.executionPrice 
-                  ? Number(formatUnits(BigInt(trade.executionPrice), 12)) 
-                  : 0;
+                // Helper function to auto-detect and format USD values from subgraph
+                // Subgraph data may be in 30 decimals (standard) or other formats
+                const formatUsdValue = (rawValue: string | null, fieldName: string): number => {
+                  if (!rawValue) return 0;
+                  try {
+                    const raw = BigInt(rawValue);
+                    const absRaw = raw >= 0n ? raw : -raw;
+                    
+                    // Auto-detect based on magnitude
+                    // Values > 1e25 are likely 30 decimals
+                    // Values < 1e25 might be in reduced precision (e.g., 12 or 18 decimals)
+                    const threshold30 = BigInt(10) ** BigInt(25);
+                    const threshold18 = BigInt(10) ** BigInt(15);
+                    
+                    let result: number;
+                    if (absRaw > threshold30) {
+                      // 30 decimals (standard GMX format)
+                      result = Number(formatUnits(raw, 30));
+                    } else if (absRaw > threshold18) {
+                      // Try 18 decimals
+                      result = Number(formatUnits(raw, 18));
+                    } else {
+                      // Try 12 decimals (legacy indexer format) or direct USD
+                      const try12 = Number(formatUnits(raw, 12));
+                      if (Math.abs(try12) > 0.01 && Math.abs(try12) < 1e8) {
+                        result = try12;
+                      } else {
+                        // Might be direct USD value (no scaling)
+                        result = Number(raw) / 1e6; // Try 6 decimals as last resort
+                      }
+                    }
+                    
+                    return result;
+                  } catch {
+                    return 0;
+                  }
+                };
+                
+                const sizeDeltaUsd = formatUsdValue(trade.sizeDeltaUsd, 'sizeDeltaUsd');
+                
+                // PnL Correction Logic
+                // Subgraph 'pnlUsd' can be corrupted (e.g. showing -1000 instead of -15).
+                // usage: Realized PnL = BasePnL (Price Move) - Fees
+                let finalPnlUsd = 0;
+                let isCorrected = false;
+                
+                const rawPnl = formatUsdValue(trade.pnlUsd, 'pnlUsd');
+                const rawBasePnl = formatUsdValue(trade.basePnlUsd, 'basePnlUsd');
+                const posFee = formatUsdValue(trade.positionFeeAmount, 'posFee');
+                const borrowFee = formatUsdValue(trade.borrowingFeeAmount, 'borrowFee');
+                const fundFee = formatUsdValue(trade.fundingFeeAmount, 'fundFee');
+                
+                const calculatedPnl = rawBasePnl - (posFee + borrowFee + fundFee);
+                
+                // If Subgraph PnL deviates by more than $1 or 5% from Calculated, suspect corruption
+                // In the user's case: Raw=-1000, Calc=-15. Deviation is huge.
+                const diff = Math.abs(rawPnl - calculatedPnl);
+                
+                // Trust Calculated PnL if available and different
+                if (trade.basePnlUsd && diff > 1.0) {
+                     finalPnlUsd = calculatedPnl;
+                     isCorrected = true;
+                } else {
+                     finalPnlUsd = rawPnl;
+                }
+                
+                // executionPrice auto-detection:
+                // - If value > 1e25, it's 30 decimals (new correct format)
+                // - If value < 1e25, it's likely 12 decimals (legacy format after indexer processing)
+                // This matches the formatGmxPrice logic in constants.ts
+                let executionPrice = 0;
+                if (trade.executionPrice) {
+                  const rawPrice = BigInt(trade.executionPrice);
+                  const threshold = BigInt(10) ** BigInt(25);
+                  
+                  if (rawPrice > threshold) {
+                    // 30 decimals (new correct format)
+                    executionPrice = Number(formatUnits(rawPrice, 30));
+                  } else {
+                    // 12 decimals (legacy subgraph format)
+                    executionPrice = Number(formatUnits(rawPrice, 12));
+                  }
+                  
+                  // Sanity check: if price is still absurd, try other formats
+                  if (executionPrice > 1e10 || executionPrice < 0.0001) {
+                    // Try 18 decimals (another common format)
+                    const try18 = Number(formatUnits(rawPrice, 18));
+                    if (try18 > 0.01 && try18 < 1e8) {
+                      executionPrice = try18;
+                    }
+                  }
+                }
                 
                 // Don't show Price/PnL for cancelled orders if 0
                 const showPrice = trade.eventName === 'OrderExecuted' && executionPrice > 0;
@@ -212,8 +296,22 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
                     </td>
                     <td className="px-6 py-4 text-right">
                       {showPnl ? (
-                        <div className={`text-sm font-bold ${pnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {pnlUsd >= 0 ? '+' : ''}${pnlUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <div className="flex flex-col items-end">
+                            <div className={`text-sm font-bold flex items-center gap-1 ${finalPnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {finalPnlUsd >= 0 ? '+' : ''}${finalPnlUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              
+                              {isCorrected && (
+                                <div className="group relative">
+                                    <span className="cursor-help text-[10px] text-amber-500">⚠️</span>
+                                    <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-48 p-2 bg-gray-900 border border-gray-700 rounded text-[10px] text-gray-300 z-50 shadow-xl">
+                                        <div className="font-bold text-amber-500 mb-1">Pass-through Correction</div>
+                                        <div>Subgraph PnL: {rawPnl.toFixed(2)}</div>
+                                        <div>Corrected: {finalPnlUsd.toFixed(2)}</div>
+                                        <div className="mt-1 opacity-70">(Base: {rawBasePnl.toFixed(2)} - Fees)</div>
+                                    </div>
+                                </div>
+                              )}
+                            </div>
                         </div>
                       ) : (
                          <div className="text-xs text-gray-600">-</div>

@@ -7,7 +7,7 @@ export const CHAIN_NAME = import.meta.env.VITE_CHAIN_NAME || "Custom GMX";
 export const RPC_URL = import.meta.env.VITE_RPC_URL || "http://115.75.100.60:8545";
 export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://localhost:9090";
 export const EXPLORER_URL = import.meta.env.VITE_EXPLORER_URL || "https://arbiscan.io";
-export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "http://217.216.75.181:8080";
+export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "https://subgraph-gmx.teknix.dev";
 
 export const CONTRACTS = {
   market: import.meta.env.VITE_MARKET_ADDRESS || "0x68dE251394Ccfda893Cc6796B68e5A8b6944F66e",
@@ -108,28 +108,40 @@ export const MOCK_VAULTS: Vault[] = [
     utilization: 64.5,
     pnl24h: 12500,
     risk: 'Low',
+    marketData: {
+        marketToken: CONTRACTS.market as `0x${string}`,
+        indexToken: CONTRACTS.wnt as `0x${string}`,
+        longToken: CONTRACTS.wnt as `0x${string}`,
+        shortToken: CONTRACTS.usdc as `0x${string}`,
+        name: 'ETH-USD',
+        indexSymbol: 'WNT',
+        longSymbol: 'WNT',
+        shortSymbol: 'USDC',
+        isActive: true
+    }
   },
   {
-    id: 'btc-vault',
-    name: 'BTC Alpha Vault',
+    id: 'gmx-vault',
+    name: 'GMX Core Vault',
     token: 'USDC',
-    tokenAddress: CONTRACTS.market,
-    markets: ['BTC-USD'],
-    totalLiquidity: 15200000,
-    utilization: 72.1,
-    pnl24h: -4200,
-    risk: 'Medium',
-  },
-  {
-    id: 'multi-asset',
-    name: 'DeFi Index Vault',
-    token: 'USDC',
-    markets: ['SOL-USD', 'ARB-USD', 'LINK-USD'],
-    totalLiquidity: 1950000,
-    utilization: 89.2,
-    pnl24h: 38500,
+    tokenAddress: "0x121116C613a78A82de601803d40203bA364E7BCf",
+    markets: ['GMX-USD'],
+    totalLiquidity: 10000000,
+    utilization: 10.5,
+    pnl24h: 200,
     risk: 'High',
-  }
+    marketData: {
+        marketToken: "0x121116C613a78A82de601803d40203bA364E7BCf" as `0x${string}`,
+        indexToken: "0xEFB08a9589b6238441935185FDf5B57B6101466f" as `0x${string}`, // GMX
+        longToken: "0xEFB08a9589b6238441935185FDf5B57B6101466f" as `0x${string}`, // GMX
+        shortToken: CONTRACTS.usdc as `0x${string}`,
+        name: 'GMX-USD',
+        indexSymbol: 'GMX',
+        longSymbol: 'GMX',
+        shortSymbol: 'USDC',
+        isActive: true
+    }
+  },
 ];
 
 // Fix: Added missing MOCK_LP_POSITIONS constant for LiquidityConsole

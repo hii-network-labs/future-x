@@ -102,9 +102,9 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
       // 2. Send Collateral
       if (params.isLong) {
         // For Long, we use ETH (WNT) as collateral
-        // User inputs collateral in USD, we need to convert to ETH amount
-        const collateralInEth = params.collateralAmount / params.currentPrice; // USD / (USD/ETH) = ETH
-        const wntCollateralAmount = parseUnits(collateralInEth.toFixed(18), 18); // ETH decimals
+        // Input `collateralAmount` is already in TOKENS (HNC), not USD.
+        // So we just parse it directly.
+        const wntCollateralAmount = parseUnits(params.collateralAmount.toString(), 18); // ETH decimals
         
         // Update params with correct WNT amount
         orderParams.numbers.initialCollateralDeltaAmount = wntCollateralAmount;

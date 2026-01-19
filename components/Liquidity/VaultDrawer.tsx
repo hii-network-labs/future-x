@@ -136,7 +136,10 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
           marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
           tokenAddress: activeSingleToken as `0x${string}`,
           amount,
-          decimals: 6 // USDC
+          decimals: 6, // USDC
+          // Pass the market's actual tokens to avoid swap issues
+          longToken: vault.marketData?.longToken as `0x${string}`,
+          shortToken: vault.marketData?.shortToken as `0x${string}`,
         });
         setAmount('');
 

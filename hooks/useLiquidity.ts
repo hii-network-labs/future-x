@@ -14,12 +14,18 @@ export interface LiquidityData {
 /**
  * Hook to fetch Liquidity data (TVL, User GM Balance)
  */
+import { usePrices } from './usePrices';
+
+/**
+ * Hook to fetch Liquidity data (TVL, User GM Balance)
+ */
 export function useLiquidity(
   marketAddr?: string, 
   longTokenAddr?: string, 
   shortTokenAddr?: string
 ) {
   const { address } = useAccount();
+  const { getPrice } = usePrices();
 
   // Use passed addresses or fallback to defaults
   const marketAddress = (marketAddr || CONTRACTS.market) as `0x${string}`;
@@ -58,6 +64,16 @@ export function useLiquidity(
         abi: ERC20_ABI,
         functionName: 'totalSupply',
       },
+      {
+         address: longTokenAddress,
+         abi: ERC20_ABI,
+         functionName: 'decimals',
+      },
+      {
+         address: shortTokenAddress,
+         abi: ERC20_ABI,
+         functionName: 'decimals',
+      }
     ],
     query: {
       refetchInterval: 10000, // Refresh every 10s
@@ -69,7 +85,9 @@ export function useLiquidity(
     marketShortBalanceResult,
     marketLongBalanceResult,
     gmDecimalsResult,
-    totalSupplyResult
+    totalSupplyResult,
+    longDecimalsResult,
+    shortDecimalsResult
   ] = result.data || [];
 
   const isLoading = result.isLoading;
@@ -86,22 +104,36 @@ export function useLiquidity(
     ? (Number(userGmBalanceRaw) * 100 / Number(totalSupplyRaw)).toFixed(4)
     : '0';
 
-  // Process TVL
-  // Simplified TVL = Short Token Balance (usually USDC) + Long Token Balance * Price
-  // For MVP we just use the Short Token balance as a proxy for stable TVL if we don't have oracle prices here yet
+  // Process TVL & Price
   const marketShortRaw = marketShortBalanceResult?.result as bigint || 0n;
-  // Assuming short token is USDC 6 decimals for now, ideally we should fetch decimals too
-  const marketTvlFormatted = formatUnits(marketShortRaw, 6); 
+  const marketLongRaw = marketLongBalanceResult?.result as bigint || 0n;
+  
+  const shortDecimals = shortDecimalsResult?.result as number || 6;
+  const longDecimals = longDecimalsResult?.result as number || 18;
 
-  // Approximating GM Price = TVL / TotalSupply? 
-  // For simplicity MVP: 1 GM ~= 1 USD (it's a stablecoin pair usually)
-  const userGmBalanceUsd = parseFloat(userGmBalanceFormatted).toFixed(2);
+  const shortPrice = getPrice(shortTokenAddress) || 1; // Default USDC to $1
+  const longPrice = getPrice(longTokenAddress);
+
+  const shortVal = Number(formatUnits(marketShortRaw, shortDecimals)) * shortPrice;
+  const longVal = Number(formatUnits(marketLongRaw, longDecimals)) * longPrice;
+  
+  const marketTvl = shortVal + longVal;
+  
+  // Calculate Market Token Price (Implied)
+  let marketTokenPrice = 1;
+  const totalSupplyNum = Number(formatUnits(totalSupplyRaw, gmDecimals));
+
+  if (totalSupplyNum > 0 && marketTvl > 0) {
+      marketTokenPrice = marketTvl / totalSupplyNum;
+  }
+
+  const userGmBalanceUsd = (Number(userGmBalanceFormatted) * marketTokenPrice).toFixed(2);
 
   return {
     data: {
       userGmBalance: parseFloat(userGmBalanceFormatted).toFixed(4),
       userGmBalanceUsd: userGmBalanceUsd,
-      marketTvlUsd: parseFloat(marketTvlFormatted).toLocaleString(undefined, { maximumFractionDigits: 0 }),
+      marketTvlUsd: marketTvl.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       sharePercentage: sharePercentage,
       isLoading
     } as LiquidityData,

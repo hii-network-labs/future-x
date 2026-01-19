@@ -1,7 +1,7 @@
 import { useReadContract, useReadContracts } from 'wagmi';
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { READER_ABI, ERC20_ABI } from '../constants/abis';
-import { CONTRACTS } from '../constants';
+import { CONTRACTS, formatGmxPrice } from '../constants';
 import { Market } from '../types';
 
 interface RawMarket {
@@ -165,11 +165,11 @@ export function useMarkets() {
              const longBal = Number(longBalRes.result) / (10 ** longDecimals);
              const shortBal = Number(shortBalRes.result) / (10 ** shortDecimals);
 
-             // Helper to format GMX price (30 decimals)
+             // Get token prices using formatGmxPrice (handles 30 decimal precision)
              const getPrice = (token: string) => {
                 const p = prices[token.toLowerCase()];
                 if (!p) return 0;
-                return Number(BigInt(p) / BigInt(10 ** 28)) / 100;
+                return formatGmxPrice(p) || 0;
              };
 
              const longPrice = getPrice(m.longToken);
