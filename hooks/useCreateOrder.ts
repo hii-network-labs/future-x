@@ -66,7 +66,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           market: params.market, // Usually matches the market address
-          initialCollateralToken: params.isLong ? (CONTRACTS.wnt as `0x${string}`) : params.collateralToken, // Force WNT for Long
+          initialCollateralToken: params.collateralToken, // Use selected token
           swapPath: [] as `0x${string}`[],
         },
         numbers: {
@@ -82,7 +82,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         orderType: 2, // Market Increase
         decreasePositionSwapType: 0,
         isLong: params.isLong,
-        shouldUnwrapNativeToken: params.isLong, // Unwrap WNT for Longs (if user sends ETH)
+        shouldUnwrapNativeToken: params.isLong, // Keep unwrapping for Longs logic (defaults)
         autoCancel: false,
         referralCode: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         dataList: [] as `0x${string}`[],
@@ -99,11 +99,19 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         args: [CONTRACTS.orderVault as `0x${string}`, executionFee],
       }));
 
+      // Determine payment type
+      const isNativePayment = params.collateralToken.toLowerCase() === CONTRACTS.wnt.toLowerCase();
+
       // 2. Send Collateral
-      if (params.isLong) {
-        // For Long, we use ETH (WNT) as collateral
-        // Input `collateralAmount` is already in TOKENS (HNC), not USD.
-        // So we just parse it directly.
+      if (isNativePayment) {
+        // For Native ETH (WNT address used as placeholder)
+        // Input `collateralAmount` is already in TOKENS (ETH), not USD if coming from input.
+        // Wait - caller passes collateralAmount. 
+        // If isLong (ETH market), collateralAmount is ETH.
+        // If isShort (ETH market), collateralAmount is USDC.
+        
+        // Caution: params.collateralAmount is "number". 
+        // If isNativePayment, we treat it as 18 decimals.
         const wntCollateralAmount = parseUnits(params.collateralAmount.toString(), 18); // ETH decimals
         
         // Update params with correct WNT amount
@@ -117,14 +125,25 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         
         totalValue += wntCollateralAmount;
       } else {
-        // For Short, we use USDC (standard logic)
+        // For ERC20 (USDC, GMX, etc.)
+        // We need to know decimals.
+        // Assumption: USDC is 6. Others ?? GMX is 18.
+        // Current params.collateralAmount is raw number.
+        // We previously used 6 hardcoded for "Short".
+        
+        let decimals = 18;
+        if (params.collateralToken.toLowerCase() === CONTRACTS.usdc.toLowerCase()) decimals = 6;
+        
+        const tokenCollateralAmount = parseUnits(params.collateralAmount.toString(), decimals);
+        orderParams.numbers.initialCollateralDeltaAmount = tokenCollateralAmount;
+
         calls.push(encodeFunctionData({
           abi: MULTICALL_ABI,
           functionName: 'sendTokens',
           args: [
-            CONTRACTS.usdc as `0x${string}`,
+            params.collateralToken,
             CONTRACTS.orderVault as `0x${string}`,
-            collateralDeltaAmount,
+            tokenCollateralAmount,
           ],
         }));
       }
@@ -143,21 +162,22 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         size: params.sizeDeltaUsd,
         isLong: params.isLong,
         totalValue,
+        isNativePayment
       });
 
-      // SAFETY CHECK: Verify Allowance Logic (only for USDC/Short)
-      if (!params.isLong && publicClient) {
-        // ... (Keep existing allowance logic but simpler reference)
-         // @ts-ignore
-         const allowance = await publicClient.readContract({
-            address: CONTRACTS.usdc as `0x${string}`, // Force USDC address for Short check
+      // SAFETY CHECK: Verify Allowance Logic (only for ERC20)
+      if (!isNativePayment && publicClient) {
+         const tokenCollateralAmount = orderParams.numbers.initialCollateralDeltaAmount;
+          // @ts-ignore
+          const allowance = await publicClient.readContract({
+            address: params.collateralToken, 
             abi: [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }] as const,
             functionName: 'allowance',
             args: [address, CONTRACTS.router as `0x${string}`],
           }) as bigint;
 
-          if (allowance < collateralDeltaAmount) {
-             toast.error('Insufficient allowance! Please approve USDC.');
+          if (allowance < tokenCollateralAmount) {
+             toast.error('Insufficient allowance! Please approve token.');
              throw new Error('Insufficient allowance.');
           }
       }

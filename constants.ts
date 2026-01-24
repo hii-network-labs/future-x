@@ -4,7 +4,7 @@ import { MarketSide, Position, PendingOrder, Vault, LPPosition, OrderType, Order
 // Environment-based Configuration (Vite uses import.meta.env)
 export const CHAIN_ID = parseInt(import.meta.env.VITE_CHAIN_ID || '22469');
 export const CHAIN_NAME = import.meta.env.VITE_CHAIN_NAME || "Custom GMX";
-export const RPC_URL = import.meta.env.VITE_RPC_URL || "http://115.75.100.60:8545";
+export const RPC_URL = import.meta.env.VITE_RPC_URL || "https://rpc-public.teknix.dev";
 export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://localhost:9090";
 export const EXPLORER_URL = import.meta.env.VITE_EXPLORER_URL || "https://arbiscan.io";
 export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "https://subgraph-gmx.teknix.dev";
@@ -38,30 +38,52 @@ export const getTokenDecimals = (address: string) => {
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;
 
-// Helper to format GMX prices (handles both 18-decimal Keeper format and 30-decimal standard)
-export const formatGmxPrice = (priceStr?: string) => {
+// Helper to format GMX prices from keeper API
+// Keeper returns: priceUsd * 10^(30 - tokenDecimals)
+// - WNT (18 dec): 1110 USD -> 1110 * 10^12 = 1.11e15
+// - USDC (6 dec): 1 USD -> 1 * 10^24 = 1e24
+//
+// @param priceStr - The raw price string from API
+// @param tokenDecimals - Optional. Token decimals (18 for WNT, 6 for USDC). 
+//                        If provided, uses exact formula. If not, estimates from magnitude.
+export const formatGmxPrice = (priceStr?: string, tokenDecimals?: number): number => {
   if (!priceStr) return 0;
   try {
     const val = BigInt(priceStr);
+    if (val === 0n) return 0;
     
-    // Auto-detect format based on magnitude
-    // If value > 1e25, it's likely 30 decimals
-    // If value < 1e25, it's likely 18 decimals (Keeper reduced precision)
-    const threshold = BigInt(10) ** BigInt(25);
+    let precision: number;
     
-    if (val > threshold) {
-      // Standard GMX 30 decimals
-      const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
-      return Number(val / divisor) / 100;
+    if (tokenDecimals !== undefined) {
+      // Exact calculation when decimals are known
+      // GMX V2 format: priceUsd * 10^(30 - tokenDecimals)
+      precision = 30 - tokenDecimals;
     } else {
-      // Keeper reduced precision (18 decimals)
-      const divisor = BigInt(10) ** BigInt(18 - 2);
-      return Number(val / divisor) / 100;
+      // Fallback: Estimate precision based on magnitude
+      const stringVal = val.toString();
+      const digits = stringVal.length;
+      
+      // Bucket by digit count:
+      // ~15 digits (1e15) = WNT/ETH (precision 12)
+      // ~24 digits (1e24) = USDC (precision 24)
+      // ~30 digits = old 30-decimal format
+      if (digits >= 28) {
+        precision = 30; // Old 30-decimal format
+      } else if (digits >= 22) {
+        precision = 24; // USDC-like (6 dec token)
+      } else {
+        precision = 12; // WNT/ETH-like (18 dec token)
+      }
     }
+    
+    // Convert to USD with 2 decimal precision
+    const divisor = BigInt(10) ** BigInt(precision - 2);
+    return Number(val / divisor) / 100;
   } catch {
     return 0;
   }
 };
+
 
 export const COLORS = {
   bg: "#0C111A",

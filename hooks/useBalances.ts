@@ -2,6 +2,15 @@ import { useBalance as useWagmiBalance, useReadContract } from 'wagmi';
 import { formatUnits, erc20Abi } from 'viem';
 import { CONTRACTS } from '../constants';
 
+
+// Helper: Floor to N decimals
+const formatFloor = (val: bigint, decimals: number, precision: number) => {
+  const formatted = formatUnits(val, decimals);
+  const [int, frac] = formatted.split('.');
+  if (!frac) return int;
+  return `${int}.${frac.slice(0, precision)}`;
+};
+
 /**
  * Hook to fetch generic token balance
  */
@@ -34,10 +43,11 @@ export function useTokenBalance(address: `0x${string}` | undefined, tokenAddress
   const isUSDC = tokenAddress?.toLowerCase() === CONTRACTS.usdc.toLowerCase();
   const decimals = isUSDC ? 6 : 18; 
 
+
   if (!tokenAddress) {
     return {
       balance: nativeBalance?.value 
-        ? Number(formatUnits(nativeBalance.value, nativeBalance.decimals)).toFixed(4)
+        ? formatFloor(nativeBalance.value, nativeBalance.decimals, 4)
         : '0.0000',
       balanceRaw: nativeBalance?.value || 0n,
       decimals: nativeBalance?.decimals || 18,
@@ -49,13 +59,13 @@ export function useTokenBalance(address: `0x${string}` | undefined, tokenAddress
 
   return {
     balance: tokenBalanceVal !== undefined
-      ? Number(formatUnits(tokenBalanceVal, decimals)).toFixed(2)
-      : '0.00',
+      ? formatFloor(tokenBalanceVal, decimals, 4) // Use 4 decimals for precision (was 2)
+      : '0.0000',
     balanceRaw: tokenBalanceVal || 0n,
     decimals: decimals,
     isLoading: isTokenLoading,
     refetch: refetchToken,
-    symbol: '', // Symbol fetching would require another call, passed from parent usually
+    symbol: '', 
   };
 }
 
@@ -71,7 +81,7 @@ export function useETHBalance(address: `0x${string}` | undefined) {
   });
 
   const formatted = balance?.value 
-    ? Number(formatUnits(balance.value, balance.decimals)).toFixed(4)
+    ? formatFloor(balance.value, balance.decimals, 4)
     : '0.0000';
 
   const raw = balance?.value || 0n;
@@ -96,7 +106,7 @@ export function useWNTBalance(address: `0x${string}` | undefined) {
   });
 
   const formatted = balance?.value 
-    ? Number(formatUnits(balance.value, balance.decimals)).toFixed(4)
+    ? formatFloor(balance.value, balance.decimals, 4)
     : '0.0000';
 
   const raw = balance?.value || 0n;

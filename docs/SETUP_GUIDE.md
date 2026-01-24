@@ -39,7 +39,7 @@ Create a `.env.local` file:
 # Chain Configuration
 VITE_CHAIN_ID=22469
 VITE_CHAIN_NAME=Custom GMX Chain
-VITE_RPC_URL=http://115.75.100.60:8545
+VITE_RPC_URL=https://rpc-public.teknix.dev
 
 # Keeper Service API
 VITE_KEEPER_API_URL=http://127.0.0.1:9090
@@ -266,7 +266,7 @@ app.get('/prices', async (c) => {
 
 ### RPC Connection Failed
 - Verify `VITE_RPC_URL` is accessible
-- Test with: `curl http://115.75.100.60:8545 -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'`
+- Test with: `curl https://rpc-public.teknix.dev -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'`
 
 ## 📖 Full Integration Reference
 

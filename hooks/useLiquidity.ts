@@ -129,9 +129,20 @@ export function useLiquidity(
 
   const userGmBalanceUsd = (Number(userGmBalanceFormatted) * marketTokenPrice).toFixed(2);
 
+  // Helper: Floor to N decimals (Inline as it might not export from hook file cleanly without dedicated utils)
+  // Actually, I can import it if I added it to utils.
+  // const formatFloor = (val: bigint, decimals: number, precision: number) => ...
+  // Let's use string manipulation directly here for safety.
+  const formatFloor = (val: bigint, decimals: number, precision: number) => {
+    const formatted = formatUnits(val, decimals);
+    const [int, frac] = formatted.split('.');
+    if (!frac) return int;
+    return `${int}.${frac.slice(0, precision)}`;
+  };
+
   return {
     data: {
-      userGmBalance: parseFloat(userGmBalanceFormatted).toFixed(4),
+      userGmBalance: formatFloor(userGmBalanceRaw, gmDecimals, 4),
       userGmBalanceUsd: userGmBalanceUsd,
       marketTvlUsd: marketTvl.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       sharePercentage: sharePercentage,

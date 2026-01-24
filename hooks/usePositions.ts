@@ -3,7 +3,7 @@ import { formatUnits } from 'viem';
 import { READER_ABI } from '../constants/abis';
 import { CONTRACTS, getTokenDecimals, formatGmxPrice, SUBGRAPH_URL } from '../constants';
 import { useMetadata } from './useMetadata';
-import { Position, MarketSide } from '../types';
+import { Position, MarketSide, PendingOrder } from '../types';
 import { useMemo } from 'react';
 import { useMarketContext } from '../contexts/MarketContext'; 
 import { useQuery } from '@tanstack/react-query';
@@ -22,6 +22,10 @@ const POSITION_HISTORY_QUERY = `
       marketAddress
       executionPrice
       timestamp
+      isLong
+      transaction {
+        hash
+      }
     }
   }
 `;
@@ -32,7 +36,8 @@ const POSITION_HISTORY_QUERY = `
 export function usePositions(
   address: `0x${string}` | undefined,
   currentEthPrice: number,
-  allPrices: Record<string, string> = {}
+  allPrices: Record<string, string> = {},
+  pendingOrders: PendingOrder[] = []
 ) {
   const { markets } = useMarketContext();
 
@@ -77,22 +82,41 @@ export function usePositions(
 
   // Create a map of Market -> Last Entry Price
   const entryPriceMap = useMemo(() => {
-    const map: Record<string, number> = {};
+    const map: Record<string, { price: number, timestamp: number }> = {};
     if (subgraphData) {
       subgraphData.forEach((action: any) => {
         if (!map[action.marketAddress.toLowerCase()] && action.executionPrice) {
            // Parse 30 decimals
-           try {
-             const price = Number(formatUnits(BigInt(action.executionPrice), 30));
-             if (price > 0) {
-               map[action.marketAddress.toLowerCase()] = price;
-             }
-           } catch {}
-        }
-      });
-    }
-    return map;
-  }, [subgraphData]);
+             // Parse price - handle potential precision mismatch (30 vs 12 decimals)
+             try {
+               const rawPrice = BigInt(action.executionPrice);
+               const threshold = BigInt(10) ** BigInt(20); // Threshold to decide if 30 decimals or less
+               
+               let price = 0;
+               if (rawPrice > threshold) {
+                   // Standard 30 decimals
+                   price = Number(formatUnits(rawPrice, 30));
+               } else {
+                   // Likely 12 decimals (as seen in recent subgraph logs)
+                   price = Number(formatUnits(rawPrice, 12));
+               }
+
+
+                if (price > 0.01) { // Sanity check for extremely small values
+                  const key = `${action.marketAddress.toLowerCase()}-${action.isLong}`;
+                  map[key] = { 
+                      price, 
+                      timestamp: action.timestamp ? Number(action.timestamp) : 0 
+                  };
+                }
+             } catch {}
+          }
+       });
+     }
+     return map;
+   }, [subgraphData]);
+
+
 
   const marketAddresses = useMemo(() => (positionsData as any[])?.map((p: any) => p.addresses.market) || [], [positionsData]);
   const tokenAddresses = useMemo(() => (positionsData as any[])?.map((p: any) => p.addresses.collateralToken) || [], [positionsData]);
@@ -149,30 +173,129 @@ export function usePositions(
       const markPrice = rawIndexPrice ? formatGmxPrice(rawIndexPrice) : 0;
 
       // Calculate entry price from position data
-      const sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, indexDecimals));
+      let sizeInTokens = Number(formatUnits(pos.numbers.sizeInTokens, indexDecimals));
+
+      // Economic Coherence Check: Determine if sizeInTokens is Raw or Wei
+      // We calculate implied entry price for both scenarios and choose the one closer to Mark Price
+      if (markPrice > 0 && sizeInUsd > 0) {
+          const rawSize = BigInt(pos.numbers.sizeInTokens);
+          const sizeInTokensWei = Number(formatUnits(rawSize, indexDecimals));
+          const sizeInTokensRaw = Number(rawSize); // Interpret as integer
+
+          const priceFromWei = sizeInTokensWei > 0 ? sizeInUsd / sizeInTokensWei : 0;
+          const priceFromRaw = sizeInTokensRaw > 0 ? sizeInUsd / sizeInTokensRaw : 0;
+
+          // Calculate logarithmic deviation from Mark Price
+          // We use log10 to treat multipliers (e.g. 10x vs 0.1x) symmetrically
+          // dev = 0 means perfect match.
+          const devWei = priceFromWei > 0 ? Math.abs(Math.log10(priceFromWei / markPrice)) : 100;
+          const devRaw = priceFromRaw > 0 ? Math.abs(Math.log10(priceFromRaw / markPrice)) : 100;
+          
+          // Debugging Coherence
+          if (index === 0) {
+              console.log(`[Coherence] Mark: ${markPrice}, SizeUSD: ${sizeInUsd}`);
+              console.log(`[Coherence] Option Wei: Size=${sizeInTokensWei}, Price=${priceFromWei}, Dev=${devWei.toFixed(4)}`);
+              console.log(`[Coherence] Option Raw: Size=${sizeInTokensRaw}, Price=${priceFromRaw}, Dev=${devRaw.toFixed(4)}`);
+          }
+
+          // Decision Matrix:
+          // If Raw is significantly better (smaller deviation) AND physically plausible (dev < 1 means within 10x factor), prefer Raw
+          // The "dev < 1" check safeguards against cases where both are wild, defaulting to standard Wei
+          if (devRaw < devWei && devRaw < 1) {
+               console.warn(`[Position #${index}] ⚠️ Economic Coherence: "Raw" sizeInTokens is more plausible. Price ${priceFromRaw.toFixed(2)} vs Wei-Price ${priceFromWei.toFixed(2)}. Using Raw.`);
+               sizeInTokens = sizeInTokensRaw;
+          } else {
+               // Default (Wei) is fine or both are bad (default to Wei)
+               sizeInTokens = sizeInTokensWei;
+          }
+      }
       
+      // DEBUG: Trace potentially huge values
+      if (index === 0) {
+          console.log(`[DEBUG POS #0] sizeInUsd (parsed): ${sizeInUsd}`);
+          console.log(`[DEBUG POS #0] sizeInTokens (parsed): ${sizeInTokens} (decimals: ${indexDecimals})`);
+          console.log(`[DEBUG POS #0] Raw sizeInUsd: ${pos.numbers.sizeInUsd}`);
+          console.log(`[DEBUG POS #0] Raw sizeInTokens: ${pos.numbers.sizeInTokens}`);
+          console.log(`[DEBUG POS #0] Calculated Entry: ${sizeInTokens > 0 ? sizeInUsd / sizeInTokens : 0}`);
+      }
+
       // Calculate raw entry price: sizeInUsd / sizeInTokens
       let calculateEntryPrice = sizeInTokens > 0 ? sizeInUsd / sizeInTokens : 0;
       
       // USE SUBGRAPH ENTRY PRICE IF AVAILABLE
       // This fixes the issue where on-chain corrupted data makes entry price look like mark price
-      const subgraphEntryPrice = entryPriceMap[pos.addresses.market.toLowerCase()];
+      const subgraphDataPoint = entryPriceMap[`${pos.addresses.market.toLowerCase()}-${isLong}`];
       let entryPrice = calculateEntryPrice;
+      let positionTimestamp = 0;
 
-      if (subgraphEntryPrice && subgraphEntryPrice > 0) {
-        entryPrice = subgraphEntryPrice;
-        console.log(`[Position #${index}] Using Subgraph Entry Price: $${entryPrice}`);
-      } else {
-        // Fallback to sanity checks logic
-        const isLegacyData = markPrice > 0 && (
-          calculateEntryPrice <= 0 ||
-          calculateEntryPrice > markPrice * 1000 || 
-          calculateEntryPrice < markPrice / 1000
-        );
+      if (subgraphDataPoint && subgraphDataPoint.price > 0) {
+        let candidate = subgraphDataPoint.price;
+        positionTimestamp = subgraphDataPoint.timestamp;
+
+        // Anomaly Fix: Subgraph returning 32 digits instead of 34 digits (Factor of 100)
+        // Check if candidate is ~1% of Mark Price (implying 100x scaling error)
+        if (markPrice > 0 && candidate < markPrice * 0.02) {
+            const scaledCandidate = candidate * 100;
+            const dev = Math.abs(scaledCandidate - markPrice) / markPrice;
+            if (dev < 0.2) { // If scaling by 100 makes it match Mark Price (<20% dev)
+                console.log(`[Position #${index}] 🔧 Auto-corrected Subgraph price precision (x100): $${candidate} -> $${scaledCandidate}`);
+                candidate = scaledCandidate;
+            }
+        }
+
+        // Sanity Check: Ensure (possibly corrected) Entry Price is reasonable
+        let isPriceValid = true;
         
-        if (isLegacyData) {
-          console.warn(`[Position #${index}] Legacy/Corrupt position detected - using mark price`);
-          entryPrice = markPrice; 
+        if (markPrice > 0) {
+             const deviation = Math.abs(candidate - markPrice) / markPrice;
+             if (deviation > 0.5) {
+                 isPriceValid = false;
+                 console.warn(`[Position #${index}] ⚠️ Ignoring suspicious Subgraph price: $${candidate} (Mark: $${markPrice}, Dev: ${(deviation*100).toFixed(0)}%) - Fallback to Calculated: $${calculateEntryPrice.toFixed(2)}`);
+             }
+        }
+
+        // Cross-Check: Implied Token Count
+        // Subgraph Indexers sometimes truncate token amounts to integers (e.g. 4.98 -> 4.0)
+        // causing Price = SizeUSD / 4.0 (inflated) instead of SizeUSD / 4.98
+        if (markPrice > 0 && sizeInTokens > 0) {
+             const impliedTokens = sizeInUsd / candidate;
+             const tokenDev = Math.abs(impliedTokens - sizeInTokens) / sizeInTokens;
+             
+             // If implied tokens deviate > 10% from actual tokens, reject the price
+             if (tokenDev > 0.1) {
+                 isPriceValid = false;
+                 console.warn(`[Position #${index}] ⚠️ Implied Token Mismatch! Subgraph Price $${candidate} implies ${impliedTokens.toFixed(4)} tokens, but Contract has ${sizeInTokens.toFixed(4)}. Dev: ${(tokenDev*100).toFixed(1)}%. Rejecting Subgraph Price.`);
+             }
+        }
+
+        if (isPriceValid) {
+            entryPrice = candidate;
+            console.log(`[Position #${index}] Using Subgraph Entry Price: $${entryPrice}`);
+        }
+      } else {
+        // Fallback: Check for recent pending orders (Transient Entry Price Fix)
+        // If we have a pending order for this market/side created < 60s ago, use its price
+        const matchingOrder = pendingOrders.find(o => 
+          o.marketAddress?.toLowerCase() === pos.addresses.market.toLowerCase() &&
+          o.side === (isLong ? MarketSide.LONG : MarketSide.SHORT) &&
+          Date.now() - o.timestamp < 60000 // Only trust orders from last 60s
+        );
+
+        if (matchingOrder && matchingOrder.price > 0) {
+           entryPrice = matchingOrder.price;
+           console.log(`[Position #${index}] Using Order Price (Transient): $${entryPrice}`);
+        } else {
+            // Fallback to sanity checks logic
+            const isLegacyData = markPrice > 0 && (
+              calculateEntryPrice <= 0 ||
+              calculateEntryPrice > markPrice * 1000 || 
+              calculateEntryPrice < markPrice / 1000
+            );
+            
+            if (isLegacyData) {
+              console.warn(`[Position #${index}] Legacy/Corrupt position detected - using mark price`);
+              entryPrice = markPrice; 
+            }
         }
       }
             
@@ -203,6 +326,7 @@ export function usePositions(
         market: marketName,
         marketAddress: pos.addresses.market as `0x${string}`,
         collateralToken: pos.addresses.collateralToken as `0x${string}`,
+        indexToken: marketInfo?.indexToken as `0x${string}`,
         side: isLong ? MarketSide.LONG : MarketSide.SHORT,
         size: sizeInUsd,
         collateral: collateralUsd,  // USD value instead of token amount
@@ -211,11 +335,12 @@ export function usePositions(
         leverage: parseFloat(leverage.toFixed(2)),
         liqPrice,
         pnl,
+        timestamp: positionTimestamp,
       };
 
       return position;
     }).filter(pos => pos.size > 0); // Filter out empty positions
-  }, [positionsData, currentEthPrice, markets, allPrices, entryPriceMap]); 
+  }, [positionsData, currentEthPrice, markets, allPrices, entryPriceMap, pendingOrders]); 
 
   return {
     positions,

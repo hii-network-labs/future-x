@@ -19,13 +19,7 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
   totalPages = 1,
   onPageChange 
 }) => {
-  // ... (getActionInfo and formatDate functions remain distinct/unchanged, we skip them in replacement content if possible, but strict replace needs exact match)
-  // To avoid huge match block, I will just match the top part.
-  
-  // Wait, I need to match the return block safely.
-  // Let's rely on the previous tool call context. I will select a range that covers the header.
-
-    const getActionInfo = (trade: any) => {
+  const getActionInfo = (trade: any) => {
     const type = parseInt(trade.orderType);
     const isLong = trade.isLong;
     const event = trade.eventName;
@@ -204,31 +198,7 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
                 
                 const sizeDeltaUsd = formatUsdValue(trade.sizeDeltaUsd, 'sizeDeltaUsd');
                 
-                // PnL Correction Logic
-                // Subgraph 'pnlUsd' can be corrupted (e.g. showing -1000 instead of -15).
-                // usage: Realized PnL = BasePnL (Price Move) - Fees
-                let finalPnlUsd = 0;
-                let isCorrected = false;
-                
-                const rawPnl = formatUsdValue(trade.pnlUsd, 'pnlUsd');
-                const rawBasePnl = formatUsdValue(trade.basePnlUsd, 'basePnlUsd');
-                const posFee = formatUsdValue(trade.positionFeeAmount, 'posFee');
-                const borrowFee = formatUsdValue(trade.borrowingFeeAmount, 'borrowFee');
-                const fundFee = formatUsdValue(trade.fundingFeeAmount, 'fundFee');
-                
-                const calculatedPnl = rawBasePnl - (posFee + borrowFee + fundFee);
-                
-                // If Subgraph PnL deviates by more than $1 or 5% from Calculated, suspect corruption
-                // In the user's case: Raw=-1000, Calc=-15. Deviation is huge.
-                const diff = Math.abs(rawPnl - calculatedPnl);
-                
-                // Trust Calculated PnL if available and different
-                if (trade.basePnlUsd && diff > 1.0) {
-                     finalPnlUsd = calculatedPnl;
-                     isCorrected = true;
-                } else {
-                     finalPnlUsd = rawPnl;
-                }
+                const finalPnlUsd = formatUsdValue(trade.pnlUsd, 'pnlUsd');
                 
                 // executionPrice auto-detection:
                 // - If value > 1e25, it's 30 decimals (new correct format)
@@ -299,18 +269,6 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
                         <div className="flex flex-col items-end">
                             <div className={`text-sm font-bold flex items-center gap-1 ${finalPnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                               {finalPnlUsd >= 0 ? '+' : ''}${finalPnlUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              
-                              {isCorrected && (
-                                <div className="group relative">
-                                    <span className="cursor-help text-[10px] text-amber-500">⚠️</span>
-                                    <div className="absolute right-0 bottom-full mb-2 hidden group-hover:block w-48 p-2 bg-gray-900 border border-gray-700 rounded text-[10px] text-gray-300 z-50 shadow-xl">
-                                        <div className="font-bold text-amber-500 mb-1">Pass-through Correction</div>
-                                        <div>Subgraph PnL: {rawPnl.toFixed(2)}</div>
-                                        <div>Corrected: {finalPnlUsd.toFixed(2)}</div>
-                                        <div className="mt-1 opacity-70">(Base: {rawBasePnl.toFixed(2)} - Fees)</div>
-                                    </div>
-                                </div>
-                              )}
                             </div>
                         </div>
                       ) : (

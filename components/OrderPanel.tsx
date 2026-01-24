@@ -40,17 +40,17 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Determine collateral price for validation
-  // If Native (undefined address), use current market price (ETH/HNC Price)
-  // If USDC (or anything else for now), assume stable $1. 
-  // TODO: In production, fetch USDC price if depeg is a concern, but $1 is standard for UI validation.
-  const validationPrice = !collateralTokenAddress ? currentPrice : 1;
+  // If Long, collateral is usually Index Token (volatile)
+  // If Short, collateral is Stable (USDC) ($1)
+  const isGenericLong = side === MarketSide.LONG;
+  const validationPrice = isGenericLong ? currentPrice : 1;
 
   // Validation hook
   const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage, collateralTokenAddress, validationPrice);
 
-  // Token approval hook for USDC
+  // Token approval hook for USDC/ERC20
   const amountBigInt = collateralAmount && !isNaN(parseFloat(collateralAmount)) 
-    ? parseUnits(collateralAmount, 6) 
+    ? parseUnits(collateralAmount, 6) // Note: This defaults to 6 but validation handles errors. 
     : 0n;
 
   const {
@@ -59,7 +59,7 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
     isConfirming,
     approve,
   } = useTokenApproval({
-    tokenAddress: collateralTokenAddress || '0x0000000000000000000000000000000000000000', // Safe fallback, query disabled if undefined
+    tokenAddress: collateralTokenAddress || '0x0000000000000000000000000000000000000000', 
     spenderAddress: CONTRACTS.router as `0x${string}`,
     amount: amountBigInt
   });
@@ -67,7 +67,6 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   const isNative = !collateralTokenAddress;
   const needsApproval = !isNative && !isApproved;
   const handleApprove = approve;
-
 
   const sizeUSD = Number(collateralAmount) * validationPrice * leverage;
   const keeperFee = 0.0025; // HNC
@@ -121,8 +120,15 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   // MAX button handler
   const handleMaxClick = () => {
     if (tokenBalanceRaw > 0n) {
-      // Use actual balance from hook
-      setCollateralAmount(tokenBalance);
+      if (isNative) {
+         // Subtract 0.01 for Gas if Native
+         const val = parseFloat(tokenBalance);
+         const max = Math.max(0, val - 0.01);
+         setCollateralAmount(max.toFixed(4)); // Use toFixed(4) to match display precision
+      } else {
+         // Use actual balance (already floored by hook)
+         setCollateralAmount(tokenBalance);
+      }
     }
   };
 

@@ -29,7 +29,7 @@ export function useOrderValidation(
   collateralTokenAddress: `0x${string}` | undefined,
   tokenPrice: number // New prop: Price of the collateral token in USD
 ): ValidationResult {
-  const { balanceRaw: tokenBalanceRaw, symbol } = useTokenBalance(address, collateralTokenAddress);
+  const { balanceRaw: tokenBalanceRaw, symbol, decimals } = useTokenBalance(address, collateralTokenAddress);
   const { balanceRaw: ethBalanceRaw } = useETHBalance(address);
   const { minCollateralUsd } = useMinCollateral();
 
@@ -37,26 +37,12 @@ export function useOrderValidation(
     // Parse collateral amount
     const collateralNum = parseFloat(collateralInput);
     
-    // Check for invalid input
-    if (isNaN(collateralNum) || collateralInput.trim() === '') {
-      return {
-        errors: {
-          insufficientCollateral: false,
-          belowMinimum: false,
-          belowMinCollateral: false,
-          insufficientGas: false,
-          leverageTooHigh: false,
-          invalidAmount: true,
-        },
-        isValid: false,
-        errorMessage: 'Enter collateral amount',
-      };
-    }
+    // ... (rest of check)
 
-    // Convert to raw units for comparison (USDC has 6 decimals)
+    // Convert to raw units using correct decimals
     let collateralRaw: bigint;
     try {
-      collateralRaw = parseUnits(collateralInput, 6);
+      collateralRaw = parseUnits(collateralInput, decimals);
     } catch {
       return {
         errors: {

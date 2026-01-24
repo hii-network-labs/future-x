@@ -16,7 +16,7 @@ import { useMarketContext } from '../contexts/MarketContext';
 import { MOCK_ORDERS } from '../constants';
 import { CONTRACTS } from '../constants';
 import { useMetadata } from '../hooks/useMetadata';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 
 interface TradeConsoleProps {
   chainState: ChainState;
@@ -33,13 +33,14 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   );
   const { createOrder, isCreating, isConfirmed } = useCreateOrder(chainState.address as `0x${string}`);
   const { closePosition, isClosing } = useClosePosition();
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
+  
   const { positions: realPositions, isLoading: positionsLoading } = usePositions(
     chainState.address as `0x${string}`,
     ethPrice,
-    prices
+    prices,
+    pendingOrders // Pass pending orders to help fix transient entry price
   );
-  const { getMarketName } = useMetadata([CONTRACTS.market], [CONTRACTS.usdc, CONTRACTS.wnt]);
-  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions');
   const [historyPage, setHistoryPage] = useState(1);
   const [side, setSide] = useState<MarketSide>(MarketSide.LONG);
@@ -69,7 +70,8 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   // Use real positions directly from Reader contract
   const positions = realPositions;
 
-  const handleOpenOrder = async (side: MarketSide, size: number, collateral: number, leverage: number) => {
+  const handleOpenOrder = async (side: MarketSide, size: number, collateral: number, leverage: number, collateralTokenAddr?: string) => {
+    // ... setup order ...
     const newOrder: PendingOrder = {
       id: `order-${Date.now()}`,
       type: OrderType.INCREASE,
@@ -77,32 +79,59 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       size,
       price: ethPrice,
       status: OrderStatus.PENDING,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      marketAddress: selectedMarket?.marketToken,
     };
     
     setPendingOrders([newOrder, ...pendingOrders]);
     
     try {
-      // For Market Orders:
-      // Long: acceptablePrice = max (willing to pay any price up to max)
-      // Short: acceptablePrice = 0 (willing to receive any price down to 0)
       const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
-      const acceptablePrice = side === MarketSide.LONG ? MAX_UINT256 : 0n;
       
+      // Calculate acceptable price with 0.3% slippage
+      // Long: Price * 1.003 (Max we are willing to buy at)
+      // Short: Price * 0.997 (Min we are willing to sell for)
+      // Note: currentPriceBigInt is 30 decimals
+      const SLIPPAGE_BPS = 30n; // 0.3% = 30 BPS. 100% = 10000 BPS
+      const BPS_DIVISOR = 10000n;
+
+      let acceptablePrice = 0n;
+      
+      if (side === MarketSide.LONG) {
+         // Long: price * (1 + 0.003)
+         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR + SLIPPAGE_BPS) / BPS_DIVISOR;
+      } else {
+         // Short: price * (1 - 0.003)
+         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR - SLIPPAGE_BPS) / BPS_DIVISOR;
+      }
+
+      // SCALE DOWN to "Compact Price" (Contract Precision)
+      // Contract expects: Price * 10^(30 - TokenDecimals)
+      // We have: Price * 10^30
+      // So we must divide by 10^TokenDecimals
+      const indexDecimals = selectedMarket?.indexDecimals || 18;
+      // const decimalsScale = 10n ** BigInt(indexDecimals);
+      // acceptablePrice = acceptablePrice / decimalsScale; // FIXED: Contract expects 30 decimals for Order params
+
       console.log('🔵 ORDER PARAMS:', { 
         side: side === MarketSide.LONG ? 'LONG' : 'SHORT',
         size, 
         collateral,
-        acceptablePrice: acceptablePrice.toString().slice(0, 20) + '...'
+        collateralToken: collateralTokenAddr,
+        market: selectedMarket?.marketToken,
+        acceptablePrice: acceptablePrice.toString(),
+        indexDecimals
       });
       
-      // Real contract call - use selectedMarket from context
       const market = selectedMarket?.marketToken || CONTRACTS.market as `0x${string}`;
-      const collateralToken = selectedMarket?.shortToken || CONTRACTS.usdc as `0x${string}`;
+      // Use passed token or fallback to logic: Long->LongToken, Short->ShortToken
+      const targetCollateralToken = collateralTokenAddr || 
+        (side === MarketSide.LONG ? (selectedMarket?.longToken || CONTRACTS.wnt) : (selectedMarket?.shortToken || CONTRACTS.usdc));
       
       await createOrder({
         market,
-        collateralToken,
+        collateralToken: targetCollateralToken as `0x${string}`,
+
         sizeDeltaUsd: size,
         collateralAmount: collateral,
         currentPrice: ethPrice, // Pass current ETH price for USD->ETH conversion
@@ -144,6 +173,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       await closePosition({
         market,
         collateralToken,
+        indexToken: pos.indexToken,
         isLong: pos.side === MarketSide.LONG,
         sizeDeltaUsd: pos.size.toString(),
       });
@@ -160,8 +190,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
 
   return (
     <div className="grid grid-cols-12 gap-6">
-      {/* Toast Notifications */}
-      <Toaster position="top-right" />
+      {/* Toast Notifications handled by App root */}
       
       <div className="col-span-12 xl:col-span-9 space-y-6">
         {/* Market Stats Header - Compact Single Row */}
@@ -306,7 +335,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       <div className="col-span-12 xl:col-span-3 space-y-6">
         <OrderPanel 
           currentPrice={ethPrice} 
-          onOpenOrder={handleOpenOrder} 
+          onOpenOrder={(s, sz, c, l) => handleOpenOrder(s, sz, c, l, collateralTokenAddress)} 
           isWalletConnected={chainState.isConnected}
           isCreatingOrder={isCreating}
           collateralTokenAddress={collateralTokenAddress as `0x${string}`}

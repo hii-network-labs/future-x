@@ -20,6 +20,7 @@ export interface Position {
   market: string;
   marketAddress: `0x${string}`; // Added for closing actions
   collateralToken: `0x${string}`; // Added for closing actions
+  indexToken: `0x${string}`; // Added for price lookup
   side: MarketSide;
   size: number; // USD
   collateral: number; // USD
@@ -28,6 +29,7 @@ export interface Position {
   leverage: number;
   liqPrice: number;
   pnl: number;
+  timestamp: number; // Added from Subgraph
 }
 
 export interface PendingOrder {
@@ -38,6 +40,7 @@ export interface PendingOrder {
   price: number;
   status: OrderStatus;
   timestamp: number;
+  marketAddress?: string; // Added to link order to position
 }
 
 export interface ChainState {

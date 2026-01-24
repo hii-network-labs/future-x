@@ -90,7 +90,7 @@ const LiquidityConsole: React.FC<LiquidityConsoleProps> = ({ chainState }) => {
           id: `lp-${market.marketToken}`,
           vaultId: market.marketToken,
           vaultName: `${market.indexSymbol || market.name} Vault`,
-          deposited: balanceFormatted,
+          deposited: depositedUsd,
           share: sharePercentage,
           pnl: 0, // Would need historical data
           feesEarned: 0, // Would need historical data
