@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { PendingOrder, OrderStatus } from '../types';
+import { formatGmxPrice } from '../constants';
 
 interface PendingOrdersPanelProps {
   orders: PendingOrder[];
@@ -44,8 +45,17 @@ const PendingOrdersPanel: React.FC<PendingOrdersPanelProps> = ({ orders, showHea
                       {order.side}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-gray-400">${order.size.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-gray-400">${order.price.toFixed(2)}</td>
+                  <td className="px-6 py-4 text-gray-400">
+                    {/* Handle potential 30-decimal strings from API local state */}
+                    {String(order.size).length > 15 ? 
+                      `$${formatGmxPrice(order.size).toLocaleString()}` : 
+                      `$${order.size.toLocaleString()}`}
+                  </td>
+                  <td className="px-6 py-4 text-gray-400">
+                    {String(order.price).length > 15 ? 
+                      `$${formatGmxPrice(order.price).toFixed(2)}` : 
+                      `$${Number(order.price).toFixed(2)}`}
+                  </td>
                   <td className="px-6 py-4">
                     {order.status === OrderStatus.PENDING ? (
                       <div className="flex items-center space-x-2 text-amber-500 font-bold animate-pulse">

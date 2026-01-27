@@ -46,39 +46,60 @@ export const USDC_DECIMALS = 6;
 // @param priceStr - The raw price string from API
 // @param tokenDecimals - Optional. Token decimals (18 for WNT, 6 for USDC). 
 //                        If provided, uses exact formula. If not, estimates from magnitude.
-export const formatGmxPrice = (priceStr?: string, tokenDecimals?: number): number => {
+export const formatGmxPrice = (priceStr?: string | number, tokenDecimals?: number): number => {
   if (!priceStr) return 0;
+  
+  // Convert number to string to avoid BigInt errors
+  const str = priceStr.toString();
+  
   try {
-    const val = BigInt(priceStr);
+    // If scientific notation (e.g. 1.2e+22), BigInt might fail. 
+    // If it's a small float (0.05), BigInt fails.
+    // If it's a huge integer string, BigInt works.
+    
+    // Check if it's already a small float?
+    if (str.includes('.') && !str.includes('e')) {
+       const f = parseFloat(str);
+       if (Math.abs(f) < 1000000000) return f; // It's likely already formatted
+    }
+    
+    // Handle Scientific Notation by expanding it? 
+    // Or just let BigInt try. BigInt("1.2e+22") throws.
+    
+    let val: bigint;
+    try {
+      val = BigInt(str);
+    } catch {
+       // Fallback for floats/scientific
+       return parseFloat(str);
+    }
+    
     if (val === 0n) return 0;
     
     let precision: number;
     
     if (tokenDecimals !== undefined) {
-      // Exact calculation when decimals are known
-      // GMX V2 format: priceUsd * 10^(30 - tokenDecimals)
       precision = 30 - tokenDecimals;
     } else {
-      // Fallback: Estimate precision based on magnitude
-      const stringVal = val.toString();
-      const digits = stringVal.length;
+      const digits = str.length;
       
-      // Bucket by digit count:
-      // ~15 digits (1e15) = WNT/ETH (precision 12)
-      // ~24 digits (1e24) = USDC (precision 24)
-      // ~30 digits = old 30-decimal format
-      if (digits >= 28) {
-        precision = 30; // Old 30-decimal format
-      } else if (digits >= 22) {
-        precision = 24; // USDC-like (6 dec token)
+      // Bucket by digit count
+      if (digits >= 27) {
+        precision = 30; // 1e30 range
+      } else if (digits >= 20) {
+        precision = 24; // 1e24 range (USDC 6 dec) -> 10^20 is $0.0001
+      } else if (digits >= 11) {
+        precision = 12; // 1e12 range (WNT 18 dec)
       } else {
-        precision = 12; // WNT/ETH-like (18 dec token)
+        precision = 0; // Assume strictly formatted
+        return Number(val);
       }
     }
     
-    // Convert to USD with 2 decimal precision
-    const divisor = BigInt(10) ** BigInt(precision - 2);
-    return Number(val / divisor) / 100;
+    const divisor = BigInt(10) ** BigInt(precision > 2 ? precision - 2 : 0);
+    const num = Number(val / divisor);
+    return precision > 2 ? num / 100 : num;
+    
   } catch {
     return 0;
   }

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { CONTRACTS, FEES, getTokenDecimals } from '../constants';
 import { MULTICALL_ABI } from '../constants/abis';
 import { useGmxProtocol } from './useGmxProtocol';
+import { calculateAcceptablePrice } from '../utils/priceUtils';
 
 interface ClosePositionParams {
   market: `0x${string}`;
@@ -12,6 +13,7 @@ interface ClosePositionParams {
   indexToken?: `0x${string}`;
   isLong: boolean;
   sizeDeltaUsd: string; // Full position size to close
+  indexDecimals?: number; // Added for dynamic price scaling
 }
 
 export const useClosePosition = () => {
@@ -82,30 +84,16 @@ export const useClosePosition = () => {
          console.warn('⚠️ No price found for close position, using 0/MAX (Dangerous)');
       }
 
-      const SLIPPAGE_BPS = 30n; // 0.3%
-      const BPS_DIVISOR = 10000n;
-      let acceptablePrice = 0n;
+      // Use unified utility for price calculation
+      // params.isLong is true if active position is long. Close Long = Decrease Long.
+      let acceptablePrice = calculateAcceptablePrice(
+          currentPriceBigInt,
+          params.isLong,
+          false, // Is Increase = FALSE (Decrease)
+          params.indexDecimals || 18, // Use dynamic decimals or safe default
+          50n // Slippage 0.5%
+      );
 
-      // Decrease Position Logic:
-      // Long: We are selling. Price must be >= acceptablePrice. 
-      //       So acceptablePrice = Price * (1 - slippage). (Min we accept)
-      // Short: We are buying back. Price must be <= acceptablePrice.
-      //        So acceptablePrice = Price * (1 + slippage). (Max we accept)
-
-      if (params.isLong) {
-         // Long Decrease: Min Price
-         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR - SLIPPAGE_BPS) / BPS_DIVISOR;
-      } else {
-         // Short Decrease: Max Price
-         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR + SLIPPAGE_BPS) / BPS_DIVISOR;
-      }
-
-      // NOTE: Do NOT scale down acceptablePrice!
-      // The contract expects acceptablePrice in FLOAT_PRECISION (30 decimals),
-      // which is the same precision as prices from the keeper API.
-      // Previously this code incorrectly divided by 10^IndexDecimals, causing
-      // the price to be ~10^18 times too small, leading to order rejection.
-      
       // Fallback if price missing (though risky)
       if (currentPriceBigInt === 0n) {
          acceptablePrice = params.isLong ? 0n : BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');

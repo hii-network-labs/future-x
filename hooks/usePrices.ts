@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from 'react';
 import { formatGmxPrice } from '../constants';
+import { apiClient } from '../lib/api-client';
 
 export function usePrices() {
   const [prices, setPrices] = useState<Record<string, number>>({});
@@ -9,20 +10,23 @@ export function usePrices() {
   useEffect(() => {
     const fetchPrices = async () => {
       try {
-        const url = `${import.meta.env.VITE_KEEPER_API_URL || "http://127.0.0.1:9090"}/prices`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          const raw = data.prices || {};
-          setRawPrices(raw);
+        const raw = await apiClient.getPrices();
+        
+        // Transform for usePrices hook compatibility (raw map of address -> price string)
+        const rawMap: Record<string, string> = {};
+        Object.entries(raw).forEach(([addr, data]) => {
+           rawMap[addr.toLowerCase()] = data.price;
+        });
+        
+        setRawPrices(rawMap);
 
-          // Format prices
-          const formatted: Record<string, number> = {};
-          Object.keys(raw).forEach(key => {
-            formatted[key.toLowerCase()] = formatGmxPrice(raw[key]);
-          });
-          setPrices(formatted);
-        }
+        // Format prices
+        const formatted: Record<string, number> = {};
+        Object.keys(rawMap).forEach(key => {
+          formatted[key] = formatGmxPrice(rawMap[key]);
+        });
+        
+        setPrices(formatted);
       } catch (e) {
         // console.warn("Price fetch failed", e);
       }

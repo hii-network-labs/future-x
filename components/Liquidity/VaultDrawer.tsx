@@ -43,10 +43,17 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   const isLongTokenWNT = longTokenAddress?.toLowerCase() === CONTRACTS.wnt.toLowerCase();
   
   // Logic: 
-  // - If WNT: User deposits HNC (native), so show nativeBalance.
-  // - If GMX/Other: User deposits that token directly, show specificLongTokenBalance.
-  const longBalance = isLongTokenWNT ? nativeBalance : specificLongTokenBalance;
-  const longSymbol = isLongTokenWNT ? 'HNC' : (vault.token === 'GMX' ? 'GMX' : (longTokenSymbol || 'Long Token'));
+  // - If WNT: User can use BOTH HNC (native) and WNT.
+  // - If GMX/Other: User deposits that token directly.
+  
+  const longBalance = React.useMemo(() => {
+    if (!isLongTokenWNT) return specificLongTokenBalance;
+    const native = parseFloat(nativeBalance?.replace(/,/g, '') || '0');
+    const wnt = parseFloat(specificLongTokenBalance?.replace(/,/g, '') || '0');
+    return (native + wnt).toFixed(4); // Combined Capacity
+  }, [isLongTokenWNT, nativeBalance, specificLongTokenBalance]);
+
+  const longSymbol = isLongTokenWNT ? 'HNC + WNT' : (vault.token === 'GMX' ? 'GMX' : (longTokenSymbol || 'Long Token'));
   
   const { data: liquidityData } = useLiquidity(
     vault.marketData?.marketToken,
@@ -75,6 +82,21 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   const shortAmountBigInt = amountShort && !isNaN(parseFloat(amountShort)) ? parseUnits(amountShort, 6) : 0n;
   const withdrawAmountBigInt = withdrawAmount && !isNaN(parseFloat(withdrawAmount)) ? parseUnits(withdrawAmount, 18) : 0n;
 
+  // Determine WNT amount to use for approval (Hybrid Logic replication)
+  const wntAmountToApproval = React.useMemo(() => {
+     if (!isLongTokenWNT) return 0n;
+     const wntBalStr = specificLongTokenBalance?.replace(/,/g, '') || '0';
+     const amountStr = amountLong || '0';
+     if (!amountStr || isNaN(parseFloat(amountStr))) return 0n;
+     
+     const wntBal = parseUnits(wntBalStr, 18);
+     const amount = parseUnits(amountStr, 18);
+     
+     // We use min(amount, wntBalance) for WNT portion
+     if (wntBal >= amount) return amount;
+     return wntBal;
+  }, [isLongTokenWNT, specificLongTokenBalance, amountLong]);
+
   // 1. Long Token Approval (WNT/GMX)
   const { 
     isApproved: isLongApproved, 
@@ -83,7 +105,8 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   } = useTokenApproval({
     tokenAddress: longTokenAddress as `0x${string}`,
     spenderAddress: CONTRACTS.router as `0x${string}`, 
-    amount: longAmountBigInt
+    // If WNT, we only need to approve the WNT portion we are actually using
+    amount: isLongTokenWNT ? wntAmountToApproval : longAmountBigInt
   });
 
   // 2. Short Token Approval (USDC)
@@ -192,7 +215,12 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
         // Check Approvals based on INPUT amounts (not just mode)
         // NOTE: Skip long token approval if it's WNT - we use sendWnt which wraps native HNC automatically
         const isLongTokenWNT = longTokenAddress?.toLowerCase() === CONTRACTS.wnt.toLowerCase();
-        const needsLongApproval = !isLongTokenWNT && (depositMode === 'long' || depositMode === 'pair') && parseUnits(amountLong || '0', 18) > 0n && !isLongApproved;
+        
+        // CORRECTION: We strictly follow the hook logic: if wntAmountToApproval > 0, we need approval!
+        const needsLongApproval = !isLongTokenWNT 
+            ? (depositMode === 'long' || depositMode === 'pair') && parseUnits(amountLong || '0', 18) > 0n && !isLongApproved
+            : wntAmountToApproval > 0n && !isLongApproved; // New WNT logic
+            
         const needsShortApproval = (depositMode === 'short' || depositMode === 'pair') && parseUnits(amountShort || '0', 6) > 0n && !isShortApproved;
 
         if (needsLongApproval) {
@@ -247,6 +275,17 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     }
   };
 
+  const formatShare = (val: string) => {
+      if (!val) return '0%';
+      // Remove % if present
+      const cleanVal = val.replace('%', '');
+      const v = parseFloat(cleanVal);
+      if (isNaN(v)) return val;
+      if (v === 0) return '0%';
+      if (v < 0.0001) return '< 0.0001%';
+      return v.toFixed(4) + '%';
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -272,7 +311,7 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
         <div className="flex-1 overflow-auto p-4 space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <DetailStat label="Your Deposits" value={`$${liquidityData?.userGmBalanceUsd || '0.00'}`} />
-            <DetailStat label="Your Share" value="~0.01%" />
+            <DetailStat label="Your Share" value={formatShare(liquidityData?.sharePercentage || '0')} />
             <DetailStat label="Unrealized PnL" value="$0.00" color="text-emerald-400" />
             <DetailStat label="Accrued Fees" value="$0.00" />
           </div>
@@ -348,8 +387,7 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
                         <div>
                             <div className="flex justify-between items-end mb-2">
                                 <label className="text-[10px] text-gray-500 font-bold uppercase">
-                                  Amount ({longSymbol}
-                                  {isLongTokenWNT && specificLongTokenBalance && parseFloat(specificLongTokenBalance) > 0 ? ` • WNT: ${specificLongTokenBalance}` : ''})
+                                  Amount ({longSymbol})
                                 </label>
                                 <span className="text-[10px] text-gray-600">Wallet: {longBalance}</span>
                             </div>
@@ -365,7 +403,8 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
                                 <button 
                                   onClick={() => {
                                     if (isLongTokenWNT) {
-                                      // Native Token: Subtract Gas Buffer (0.01)
+                                      // Native + WNT: Subtract Gas Buffer (0.01) ONLY from Native part if needed? 
+                                      // Valid Max = Total - 0.01 (limit by gas safety)
                                       const val = parseFloat(longBalance || '0');
                                       const max = Math.max(0, val - 0.01);
                                       setAmountLong(max.toFixed(4));

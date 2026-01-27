@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWalletClient, useWaitForTransactionReceipt, usePublicClient } from 'wagmi';
-import { encodeFunctionData, parseUnits, type Hex } from 'viem';
+import { encodeFunctionData, parseUnits, parseAbi, type Hex } from 'viem';
 import { MULTICALL_ABI } from '../constants/abis';
 import { CONTRACTS, FEES } from '../constants';
 import toast from 'react-hot-toast';
@@ -151,27 +151,66 @@ export function useCreateDeposit(address: `0x${string}` | undefined) {
 
       // B. Send Long Token
       if (longAmountBigInt > 0n) {
-          // Check if Long Token is WNT (Native unwrapped)
-          // Actually, GMX UI always handles WNT as wrapped/native.
-          // If the user is paying in ETH (native), we use sendWnt.
-          // If paying in WNT (ERC20), we use sendTokens.
-          // For simplicity, let's assume we use sendTokens for WNT unless specific reason not to.
-          // BUT, sendWnt is cheaper/easier if user has ETH.
-          // Let's assume standard ERC20 transfer for simplicity for now, UNLESS it is the 'native' flow.
-          // However, useCreateDeposit usually assumes connected wallet has ETH.
-          // Let's look at `CONTRACTS.wnt`.
-          
-          // Heuristic: If we are depositing 'WNT', we typically treat it as ETH from the user's wallet.
-          // So we use sendWnt.
+          // Check if Long Token is WNT (Native Wrapper)
           if (initialLongToken.toLowerCase() === CONTRACTS.wnt.toLowerCase()) {
-              calls.push(encodeFunctionData({
-                  abi: MULTICALL_ABI,
-                  functionName: 'sendWnt',
-                  args: [CONTRACTS.depositVault as `0x${string}`, longAmountBigInt],
-              }));
-              totalEthValue += longAmountBigInt;
+              // HYBRID LOGIC: Use WNT first, then Native (ETH)
+              let wntAmountToUse = 0n;
+              let ethAmountToUse = 0n;
+
+              try {
+                  // Fetch current WNT balance on-demand
+                  if (publicClient) {
+                      const wntBalance = await publicClient.readContract({
+                          address: initialLongToken,
+                          abi: parseAbi(['function balanceOf(address) view returns (uint256)']),
+                          functionName: 'balanceOf',
+                          args: [address]
+                      } as any) as bigint;
+                      
+                      console.log('💰 Current WNT Balance:', wntBalance.toString());
+                      
+                      if (wntBalance >= longAmountBigInt) {
+                          wntAmountToUse = longAmountBigInt;
+                      } else {
+                          wntAmountToUse = wntBalance;
+                          ethAmountToUse = longAmountBigInt - wntBalance;
+                      }
+                  } else {
+                       // Fallback if client not ready: Force Native
+                       ethAmountToUse = longAmountBigInt; 
+                  }
+              } catch (e) {
+                  console.warn('Failed to fetch WNT balance, falling back to Native:', e);
+                  ethAmountToUse = longAmountBigInt;
+              }
+
+              console.log('🔄 Splitting Deposit:', { 
+                  total: longAmountBigInt.toString(),
+                  useWnt: wntAmountToUse.toString(),
+                  useEth: ethAmountToUse.toString()
+              });
+
+              // 1. Send WNT (ERC20)
+              if (wntAmountToUse > 0n) {
+                  calls.push(encodeFunctionData({
+                      abi: MULTICALL_ABI,
+                      functionName: 'sendTokens',
+                      args: [initialLongToken, CONTRACTS.depositVault as `0x${string}`, wntAmountToUse],
+                  }));
+              }
+
+              // 2. Send Native (ETH)
+              if (ethAmountToUse > 0n) {
+                  calls.push(encodeFunctionData({
+                      abi: MULTICALL_ABI,
+                      functionName: 'sendWnt',
+                      args: [CONTRACTS.depositVault as `0x${string}`, ethAmountToUse],
+                  }));
+                  totalEthValue += ethAmountToUse;
+              }
+
           } else {
-              // ERC20 Long Token (e.g. GMX, BTC)
+              // Regular ERC20 Long Token (e.g. GMX, BTC)
               calls.push(encodeFunctionData({
                   abi: MULTICALL_ABI,
                   functionName: 'sendTokens',

@@ -27,9 +27,11 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
     // DEBUG LOG
     if (type >= 4 && type <= 6) {
       console.log(`[TradeHistory] Decrease Trade ${trade.id}:`, {
-         type, isLong, event, 
+         type, 
+         isLongRaw: trade.isLong,
+         isLongType: typeof trade.isLong,
+         event, 
          market: trade.marketAddress,
-         collateral: trade.initialCollateralTokenAddress
       });
     }
 

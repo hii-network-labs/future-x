@@ -9,9 +9,11 @@ import MarketSelector from './MarketSelector';
 import { ChainState, MarketSide, Position, PendingOrder, OrderStatus, OrderType } from '../types';
 import { useGmxProtocol } from '../hooks/useGmxProtocol';
 import { useCreateOrder } from '../hooks/useCreateOrder';
-import { usePositions } from '../hooks/usePositions';
+import { useApiPositions as usePositions } from '../hooks/useApiPositions';
 import { useClosePosition } from '../hooks/useClosePosition';
 import { useTradeHistory } from '../hooks/useTradeHistory';
+import { formatUnits } from 'viem';
+import { calculateAcceptablePrice } from '../utils/priceUtils';
 import { useMarketContext } from '../contexts/MarketContext';
 import { MOCK_ORDERS } from '../constants';
 import { CONTRACTS } from '../constants';
@@ -36,10 +38,7 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   
   const { positions: realPositions, isLoading: positionsLoading } = usePositions(
-    chainState.address as `0x${string}`,
-    ethPrice,
-    prices,
-    pendingOrders // Pass pending orders to help fix transient entry price
+    chainState.address as `0x${string}`
   );
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions');
   const [historyPage, setHistoryPage] = useState(1);
@@ -88,30 +87,16 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
     try {
       const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
       
-      // Calculate acceptable price with 0.3% slippage
-      // Long: Price * 1.003 (Max we are willing to buy at)
-      // Short: Price * 0.997 (Min we are willing to sell for)
-      // Note: currentPriceBigInt is 30 decimals
-      const SLIPPAGE_BPS = 30n; // 0.3% = 30 BPS. 100% = 10000 BPS
-      const BPS_DIVISOR = 10000n;
-
-      let acceptablePrice = 0n;
-      
-      if (side === MarketSide.LONG) {
-         // Long: price * (1 + 0.003)
-         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR + SLIPPAGE_BPS) / BPS_DIVISOR;
-      } else {
-         // Short: price * (1 - 0.003)
-         acceptablePrice = currentPriceBigInt * (BPS_DIVISOR - SLIPPAGE_BPS) / BPS_DIVISOR;
-      }
-
-      // SCALE DOWN to "Compact Price" (Contract Precision)
-      // Contract expects: Price * 10^(30 - TokenDecimals)
-      // We have: Price * 10^30
-      // So we must divide by 10^TokenDecimals
       const indexDecimals = selectedMarket?.indexDecimals || 18;
-      // const decimalsScale = 10n ** BigInt(indexDecimals);
-      // acceptablePrice = acceptablePrice / decimalsScale; // FIXED: Contract expects 30 decimals for Order params
+      
+      const acceptablePrice = calculateAcceptablePrice(
+          currentPriceBigInt, 
+          side === MarketSide.LONG, 
+          true, // Is Increase (Open)
+          indexDecimals,
+          50n // Slippage 0.5%
+      );
+
 
       console.log('🔵 ORDER PARAMS:', { 
         side: side === MarketSide.LONG ? 'LONG' : 'SHORT',
@@ -170,12 +155,24 @@ const TradeConsole: React.FC<TradeConsoleProps> = ({ chainState }) => {
       const market = pos.marketAddress;
       const collateralToken = pos.collateralToken;
       
+      console.log('Closing Position - Debug:', {
+        market,
+        side: pos.side,
+        isLongCheck: pos.side === MarketSide.LONG,
+        collateralToken
+      });
+
       await closePosition({
         market,
         collateralToken,
         indexToken: pos.indexToken,
+        // FIX: Ensure isLong is strictly boolean true/false based on Side Enum
         isLong: pos.side === MarketSide.LONG,
-        sizeDeltaUsd: pos.size.toString(),
+        // Use formatUnits on sizeRaw to preserve exact precision for round-trip
+        // sizeRaw is 30 decimals BigInt. formatUnits -> string "123.456..."
+        // closePosition will parseUnits(str, 30) -> BigInt "123456..." (Exact match)
+        sizeDeltaUsd: formatUnits(pos.sizeRaw, 30),
+        indexDecimals: pos.indexDecimals, // Pass dynamic decimals
       });
       
       toast.dismiss('close-position');

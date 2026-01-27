@@ -23,6 +23,7 @@ export interface Position {
   indexToken: `0x${string}`; // Added for price lookup
   side: MarketSide;
   size: number; // USD
+  sizeRaw: bigint; // Added for precise operations
   collateral: number; // USD
   entryPrice: number;
   markPrice: number;
@@ -30,6 +31,7 @@ export interface Position {
   liqPrice: number;
   pnl: number;
   timestamp: number; // Added from Subgraph
+  indexDecimals?: number; // Added for dynamic price scaling
 }
 
 export interface PendingOrder {

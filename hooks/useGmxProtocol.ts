@@ -3,29 +3,14 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { KEEPER_API_URL, CONTRACTS, FEES, GMX_DECIMALS, USDC_DECIMALS } from '../constants';
 import { MarketSide, Position, PendingOrder, OrderStatus, OrderType } from '../types';
 
+import { formatGmxPrice } from '../constants'; // Import formatted helper directly
+
 // Type for price data from keeper API
 interface PriceDataEntry {
-  price: string;   // GMX V2 format: priceUsd * 10^(30-decimals)
+  price: string;   // GMX V2 format: priceUsd * 10^(30-decimals) -- WAIT, Oracle is 30 dec strict?
+  // Correction: Oracle returning pure 30 decimals.
   decimals: number; // Token decimals (18 for WNT, 6 for USDC)
 }
-
-// Convert GMX V2 price to USD
-// Formula: priceUsd = price / 10^(30 - decimals)
-export const convertPriceToUsd = (priceData: PriceDataEntry | undefined): number => {
-  if (!priceData || !priceData.price) return 0;
-  try {
-    const val = BigInt(priceData.price);
-    if (val === 0n) return 0;
-    
-    // GMX V2 standard: price = priceUsd * 10^(30 - tokenDecimals)
-    // So to get priceUsd: divide by 10^(30 - tokenDecimals)
-    const precision = 30 - priceData.decimals;
-    const divisor = BigInt(10) ** BigInt(precision - 2); // -2 for 2 decimal places
-    return Number(val / divisor) / 100;
-  } catch {
-    return 0;
-  }
-};
 
 /**
  * Hook for GMX protocol data - now accepts indexToken param for multi-market support
@@ -47,14 +32,17 @@ export function useGmxProtocol(address: string | null, indexToken?: `0x${string}
       try {
         const res = await fetch(`${KEEPER_API_URL}/prices`);
         if (res.ok) {
-          const data = await res.json();
-          setPrices(data.prices || {});
-          setPriceData(data.priceData || {});
+          const json = await res.json();
+          const data = json.data; // NestJS wraps response in data object
+          setPrices(data?.prices || {});
+          setPriceData(data?.priceData || {});
           
           // 📊 PRICE POLLING LOG
-          const formattedPrices = Object.entries(data.priceData || {} as Record<string, PriceDataEntry>)
-            .reduce((acc, [addr, pd]) => {
-              acc[addr.slice(0, 10) + '...'] = convertPriceToUsd(pd as PriceDataEntry);
+          const formattedPrices = Object.entries(data.priceData || {})
+            .reduce((acc, [addr, entry]) => {
+              const pd = entry as PriceDataEntry;
+              // Pass undefined for decimals to force formatGmxPrice to detect 30 decimals (Oracle Standard)
+              acc[addr.slice(0, 10) + '...'] = formatGmxPrice(pd?.price); 
               return acc;
             }, {} as Record<string, number>);
             
@@ -97,7 +85,7 @@ export function useGmxProtocol(address: string | null, indexToken?: `0x${string}
       ([addr]) => addr.toLowerCase() === activeIndexToken
     );
     const pd = entry?.[1];
-    const formatted = convertPriceToUsd(pd);
+    const formatted = formatGmxPrice(pd?.price);
     
     // 📊 CURRENT PRICE CALCULATION LOG
     console.log('[useGmxProtocol] Current Price Calculation:', {
@@ -127,6 +115,6 @@ export function useGmxProtocol(address: string | null, indexToken?: `0x${string}
     ethPrice: currentPrice,
     currentPriceBigInt,
     activeIndexToken,
-    convertPriceToUsd, // Export utility for other components
+    formatGmxPrice, // Export utility for other components
   };
 }
