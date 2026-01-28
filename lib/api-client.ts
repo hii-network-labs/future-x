@@ -30,6 +30,14 @@ export interface Market {
   indexTokenPrice?: TokenPrice | { price: string };
   longTokenPrice?: TokenPrice | { price: string };
   shortTokenPrice?: TokenPrice | { price: string };
+  
+  // Dynamic Stats
+  tvl?: number;
+  longPoolAmount?: number;
+  longPoolUsd?: number;
+  shortPoolAmount?: number;
+  shortPoolUsd?: number;
+  marketTokenPrice?: number;
 }
 
 export interface ProtocolStats {

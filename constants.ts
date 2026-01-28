@@ -98,9 +98,17 @@ export const formatGmxPrice = (priceStr?: string | number, tokenDecimals?: numbe
     
     const divisor = BigInt(10) ** BigInt(precision > 2 ? precision - 2 : 0);
     const num = Number(val / divisor);
-    return precision > 2 ? num / 100 : num;
+    const result = precision > 2 ? num / 100 : num;
     
-  } catch {
+    // Log suspicious results
+    if (result === 0) {
+        console.warn(`[formatGmxPrice] Result is 0. Input: ${str}, Decimals: ${tokenDecimals}, Precision: ${precision}`);
+    }
+    
+    return result;
+    
+  } catch (e) {
+    console.error(`[formatGmxPrice] Error parsing ${str}:`, e);
     return 0;
   }
 };

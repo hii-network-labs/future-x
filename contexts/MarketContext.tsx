@@ -1,5 +1,5 @@
 import React, { createContext, useContext, ReactNode } from 'react';
-import { useApiMarkets as useMarkets } from '../hooks/useApiMarkets';
+import { useMarkets } from '../hooks/useMarkets';
 import { Market } from '../types';
 
 interface MarketContextType {

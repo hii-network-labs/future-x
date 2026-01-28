@@ -1,20 +1,27 @@
+
 import { useAccount, useReadContracts } from 'wagmi';
 import { ERC20_ABI } from '../constants/abis';
 import { CONTRACTS } from '../constants';
 import { formatUnits } from 'viem';
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '../lib/api-client';
 
 export interface LiquidityData {
   userGmBalance: string;
   userGmBalanceUsd: string;
   marketTvlUsd: string;
   sharePercentage: string;
+  
+  // Backing Composition
+  longPoolAmount: number;
+  longPoolUsd: number;
+  longPoolPercentage: number;
+  shortPoolAmount: number;
+  shortPoolUsd: number;
+  shortPoolPercentage: number;
+  
   isLoading: boolean;
 }
-
-/**
- * Hook to fetch Liquidity data (TVL, User GM Balance)
- */
-import { usePrices } from './usePrices';
 
 /**
  * Hook to fetch Liquidity data (TVL, User GM Balance)
@@ -25,15 +32,21 @@ export function useLiquidity(
   shortTokenAddr?: string
 ) {
   const { address } = useAccount();
-  const { getPrice } = usePrices();
 
   // Use passed addresses or fallback to defaults
   const marketAddress = (marketAddr || CONTRACTS.market) as `0x${string}`;
-  const shortTokenAddress = (shortTokenAddr || CONTRACTS.usdc) as `0x${string}`;
-  const longTokenAddress = (longTokenAddr || CONTRACTS.wnt) as `0x${string}`;
+  
+  // 1. Fetch Global Market Stats from Backend (API)
+  const { data: markets, isLoading: isApiLoading } = useQuery({
+    queryKey: ['markets'],
+    queryFn: () => apiClient.getMarkets(),
+    refetchInterval: 10000,
+  });
 
-  // 1. Read User GM Balance (Market Token is an ERC20)
-  // 2. Read Market TVL (USDC Balance + WNT Balance in Market)
+  const marketStats = markets?.find(m => m.address.toLowerCase() === marketAddress.toLowerCase());
+
+  // 2. Read User GM Balance (Market Token is an ERC20)
+  // We still need to read user balance from chain as it is specific to the connected wallet
   const result = useReadContracts({
     contracts: [
       {
@@ -41,18 +54,6 @@ export function useLiquidity(
         abi: ERC20_ABI,
         functionName: 'balanceOf',
         args: [address || '0x0000000000000000000000000000000000000000'],
-      },
-      {
-        address: shortTokenAddress,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [marketAddress],
-      },
-      {
-        address: longTokenAddress,
-        abi: ERC20_ABI,
-        functionName: 'balanceOf',
-        args: [marketAddress],
       },
       {
         address: marketAddress,
@@ -63,34 +64,20 @@ export function useLiquidity(
         address: marketAddress,
         abi: ERC20_ABI,
         functionName: 'totalSupply',
-      },
-      {
-         address: longTokenAddress,
-         abi: ERC20_ABI,
-         functionName: 'decimals',
-      },
-      {
-         address: shortTokenAddress,
-         abi: ERC20_ABI,
-         functionName: 'decimals',
       }
     ],
     query: {
-      refetchInterval: 10000, // Refresh every 10s
+      refetchInterval: 10000,
     }
   });
 
   const [
     userGmBalanceResult,
-    marketShortBalanceResult,
-    marketLongBalanceResult,
     gmDecimalsResult,
-    totalSupplyResult,
-    longDecimalsResult,
-    shortDecimalsResult
+    totalSupplyResult
   ] = result.data || [];
 
-  const isLoading = result.isLoading;
+  const isLoading = result.isLoading || isApiLoading;
 
   // Process User Balance
   const userGmBalanceRaw = userGmBalanceResult?.result as bigint || 0n;
@@ -98,41 +85,19 @@ export function useLiquidity(
   const userGmBalanceFormatted = formatUnits(userGmBalanceRaw, gmDecimals);
   
   // Process Share %
+  // Ideally use API total supply if available, but chain is fine too
   const totalSupplyRaw = totalSupplyResult?.result as bigint || 0n;
 
   const sharePercentage = totalSupplyRaw > 0n 
     ? (Number(userGmBalanceRaw) * 100 / Number(totalSupplyRaw)).toFixed(4)
     : '0';
 
-  // Process TVL & Price
-  const marketShortRaw = marketShortBalanceResult?.result as bigint || 0n;
-  const marketLongRaw = marketLongBalanceResult?.result as bigint || 0n;
+  // Use API Data for TVL & Backing
+  const marketTvl = marketStats?.tvl || 0;
+  const marketTokenPrice = marketStats?.marketTokenPrice || 0;
   
-  const shortDecimals = shortDecimalsResult?.result as number || 6;
-  const longDecimals = longDecimalsResult?.result as number || 18;
-
-  const shortPrice = getPrice(shortTokenAddress) || 1; // Default USDC to $1
-  const longPrice = getPrice(longTokenAddress);
-
-  const shortVal = Number(formatUnits(marketShortRaw, shortDecimals)) * shortPrice;
-  const longVal = Number(formatUnits(marketLongRaw, longDecimals)) * longPrice;
-  
-  const marketTvl = shortVal + longVal;
-  
-  // Calculate Market Token Price (Implied)
-  let marketTokenPrice = 1;
-  const totalSupplyNum = Number(formatUnits(totalSupplyRaw, gmDecimals));
-
-  if (totalSupplyNum > 0 && marketTvl > 0) {
-      marketTokenPrice = marketTvl / totalSupplyNum;
-  }
-
   const userGmBalanceUsd = (Number(userGmBalanceFormatted) * marketTokenPrice).toFixed(2);
 
-  // Helper: Floor to N decimals (Inline as it might not export from hook file cleanly without dedicated utils)
-  // Actually, I can import it if I added it to utils.
-  // const formatFloor = (val: bigint, decimals: number, precision: number) => ...
-  // Let's use string manipulation directly here for safety.
   const formatFloor = (val: bigint, decimals: number, precision: number) => {
     const formatted = formatUnits(val, decimals);
     const [int, frac] = formatted.split('.');
@@ -140,12 +105,34 @@ export function useLiquidity(
     return `${int}.${frac.slice(0, precision)}`;
   };
 
+  // Calculate Percentages from API data
+  const longPoolAmount = marketStats?.longPoolAmount || 0;
+  const longPoolUsd = marketStats?.longPoolUsd || 0;
+  
+  const shortPoolAmount = marketStats?.shortPoolAmount || 0;
+  const shortPoolUsd = marketStats?.shortPoolUsd || 0;
+
+  const totalPoolUsd = longPoolUsd + shortPoolUsd;
+  
+  const longPoolPercentage = totalPoolUsd > 0 ? (longPoolUsd / totalPoolUsd) * 100 : 0;
+  const shortPoolPercentage = totalPoolUsd > 0 ? (shortPoolUsd / totalPoolUsd) * 100 : 0;
+
   return {
     data: {
       userGmBalance: formatFloor(userGmBalanceRaw, gmDecimals, 4),
       userGmBalanceUsd: userGmBalanceUsd,
       marketTvlUsd: marketTvl.toLocaleString(undefined, { maximumFractionDigits: 0 }),
       sharePercentage: sharePercentage,
+      
+      // Backing Composition Data (From API)
+      longPoolAmount,
+      longPoolUsd,
+      longPoolPercentage,
+      
+      shortPoolAmount,
+      shortPoolUsd,
+      shortPoolPercentage,
+
       isLoading
     } as LiquidityData,
     refetch: result.refetch

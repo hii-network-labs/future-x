@@ -34,7 +34,9 @@ const LPPositionsTable: React.FC<LPPositionsTableProps> = ({ positions, onManage
                 <tr key={pos.id} className="hover:bg-gray-800/30 transition-colors">
                   <td className="px-6 py-4 font-bold text-white text-sm">{pos.vaultName}</td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-300">${pos.deposited.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-xs text-gray-500 font-bold">{pos.share}%</td>
+                  <td className="px-6 py-4 text-xs text-gray-500 font-bold">
+                    {pos.share < 0.0001 && pos.share > 0 ? '< 0.0001' : pos.share.toFixed(4)}%
+                  </td>
                   <td className="px-6 py-4">
                     <div className={`text-sm font-bold ${pos.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {pos.pnl >= 0 ? '+' : ''}${pos.pnl.toLocaleString()}

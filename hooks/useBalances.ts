@@ -1,6 +1,6 @@
 import { useBalance as useWagmiBalance, useReadContract } from 'wagmi';
 import { formatUnits, erc20Abi } from 'viem';
-import { CONTRACTS } from '../constants';
+import { useTokenDecimals } from './useTokens';
 
 
 // Helper: Floor to N decimals
@@ -36,12 +36,9 @@ export function useTokenBalance(address: `0x${string}` | undefined, tokenAddress
     }
   });
 
-  // Optional: Fetch decimals if ERC20 (optimisation: hardcode known tokens or fetch once)
-  // For now, assume 6 for USDC if address matches, else 18 to start, or fetch.
-  // GMX V2 tokens usually 6 (USDC) or 18.
-  // Let's assume 18 usually but 6 for USDC.
-  const isUSDC = tokenAddress?.toLowerCase() === CONTRACTS.usdc.toLowerCase();
-  const decimals = isUSDC ? 6 : 18; 
+  // Fetch decimals dynamically from keeper API
+  const { decimals } = useTokenDecimals(tokenAddress);
+ 
 
 
   if (!tokenAddress) {

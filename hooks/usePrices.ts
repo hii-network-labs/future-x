@@ -10,13 +10,26 @@ export function usePrices() {
   useEffect(() => {
     const fetchPrices = async () => {
       try {
-        const raw = await apiClient.getPrices();
+        const raw: any = await apiClient.getPrices();
         
         // Transform for usePrices hook compatibility (raw map of address -> price string)
         const rawMap: Record<string, string> = {};
-        Object.entries(raw).forEach(([addr, data]) => {
-           rawMap[addr.toLowerCase()] = data.price;
-        });
+        
+        // Handle new API structure { prices, priceData }
+        if (raw.priceData) {
+            Object.values(raw.priceData).forEach((data: any) => {
+                if (data.token && data.price) {
+                    rawMap[data.token.toLowerCase()] = data.price;
+                }
+            });
+        } else {
+            // Fallback for flat structure or other formats
+            Object.entries(raw).forEach(([addr, data]: [string, any]) => {
+               if (data?.price) {
+                   rawMap[addr.toLowerCase()] = data.price;
+               }
+            });
+        }
         
         setRawPrices(rawMap);
 

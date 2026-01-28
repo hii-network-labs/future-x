@@ -99,4 +99,15 @@ export interface Market {
   longDecimals?: number;          // Decimals of long token
   poolValueUsd?: number;          // Total liquidity in USD
   isActive: boolean;              // Has sufficient liquidity
+  
+  // Backing Composition
+  longPoolAmount?: number;
+  shortPoolAmount?: number;
+  longPoolUsd?: number;
+  shortPoolUsd?: number;
+  longPoolPercentage?: number;
+  shortPoolPercentage?: number;
+  
+  // Price Data
+  indexTokenPrice?: { price: string; timestamp?: number };
 }

@@ -316,6 +316,62 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
             <DetailStat label="Accrued Fees" value="$0.00" />
           </div>
 
+          {/* Backing Composition */}
+          {liquidityData && (
+             <div className="space-y-3 pt-2 pb-2">
+               <div className="flex justify-between items-center px-1">
+                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Backing Composition</h4>
+                   <div className="text-[10px] text-gray-500 font-mono">
+                     ${liquidityData.marketTvlUsd} TVL
+                   </div>
+               </div>
+               
+               {/* Visual Bar */}
+               <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden flex">
+                  <div 
+                    className="h-full bg-indigo-500 transition-all duration-500" 
+                    style={{ width: `${liquidityData.longPoolPercentage || 50}%` }}
+                  />
+                  <div 
+                    className="h-full bg-emerald-500 transition-all duration-500" 
+                    style={{ width: `${liquidityData.shortPoolPercentage || 50}%` }}
+                  />
+               </div>
+
+               {/* Legend / Details */}
+               <div className="grid grid-cols-2 gap-4">
+                  {/* Long Side */}
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3">
+                     <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase">{longSymbol} (Longs)</span>
+                     </div>
+                     <div className="text-sm font-bold text-gray-200">
+                        {(liquidityData.longPoolAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                     </div>
+                     <div className="text-[10px] text-gray-500">
+                        ${(liquidityData.longPoolUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({liquidityData.longPoolPercentage?.toFixed(1) || '0.0'}%)
+                     </div>
+                  </div>
+
+                  {/* Short Side */}
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-right">
+                     <div className="flex items-center justify-end gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-emerald-400 uppercase">USDC (Shorts)</span>
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                     </div>
+                     <div className="text-sm font-bold text-gray-200">
+                        {(liquidityData.shortPoolAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                     </div>
+                     <div className="text-[10px] text-gray-500">
+                        ({liquidityData.shortPoolPercentage?.toFixed(1) || '0.0'}%) ${(liquidityData.shortPoolUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} 
+                     </div>
+                  </div>
+               </div>
+             </div>
+          )}
+
+
           <div className="bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
             <div className="flex border-b border-gray-800">
               <button 

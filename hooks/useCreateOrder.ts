@@ -6,6 +6,40 @@ import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
 import { estimateExecutionFee, GAS_LIMITS, formatExecutionFee } from '../utils/gasUtils';
 
+const API_BASE = import.meta.env.VITE_KEEPER_API_URL || 'http://localhost:3000';
+
+// Cache for token decimals to avoid repeated API calls
+const decimalsCache: Record<string, number> = {};
+
+/**
+ * Fetch token decimals from keeper API (with caching)
+ */
+async function getTokenDecimals(tokenAddress: string): Promise<number> {
+  const key = tokenAddress.toLowerCase();
+  
+  // Return cached value if available
+  if (decimalsCache[key] !== undefined) {
+    return decimalsCache[key];
+  }
+  
+  try {
+    const response = await fetch(`${API_BASE}/tokens/${tokenAddress}`);
+    if (response.ok) {
+      const result = await response.json();
+      const data = result.data || result;
+      if (data.decimals !== undefined) {
+        decimalsCache[key] = data.decimals;
+        return data.decimals;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to fetch token decimals, defaulting to 18:', e);
+  }
+  
+  // Default to 18 if API fails
+  return 18;
+}
+
 interface CreateOrderParams {
   market: `0x${string}`;         // Market address (from selected market)
   collateralToken: `0x${string}`; // Collateral token (usually shortToken)
@@ -125,14 +159,8 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         
         totalValue += wntCollateralAmount;
       } else {
-        // For ERC20 (USDC, GMX, etc.)
-        // We need to know decimals.
-        // Assumption: USDC is 6. Others ?? GMX is 18.
-        // Current params.collateralAmount is raw number.
-        // We previously used 6 hardcoded for "Short".
-        
-        let decimals = 18;
-        if (params.collateralToken.toLowerCase() === CONTRACTS.usdc.toLowerCase()) decimals = 6;
+        // For ERC20 tokens - fetch decimals dynamically from API
+        const decimals = await getTokenDecimals(params.collateralToken);
         
         const tokenCollateralAmount = parseUnits(params.collateralAmount.toString(), decimals);
         orderParams.numbers.initialCollateralDeltaAmount = tokenCollateralAmount;
