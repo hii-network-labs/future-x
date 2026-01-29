@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWalletClient, useConfig, usePublicClient, useWaitForTransactionReceipt } from 'wagmi';
 import { encodeFunctionData, parseUnits, type Hex } from 'viem';
+import { useQueryClient } from '@tanstack/react-query';
 import { MULTICALL_ABI } from '../constants/abis';
 import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
@@ -57,6 +58,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
   const { data: walletClient } = useWalletClient();
   const config = useConfig();
   const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
   const [txHash, setTxHash] = useState<Hex | undefined>();
   const [isCreating, setIsCreating] = useState(false);
 
@@ -64,6 +66,19 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash: txHash,
   });
+
+  // 🔄 Invalidate position caches when order creation is confirmed
+  // Note: Order creation confirmed means order is in queue, not yet executed by keeper
+  // But we still want to refresh to show pending order status
+  useEffect(() => {
+    if (isConfirmed && txHash) {
+      console.log('✅ Order creation confirmed - invalidating position caches');
+      // Invalidate position queries to catch keeper execution faster
+      queryClient.invalidateQueries({ queryKey: ['apiPositions'] });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      toast.success('Order submitted! Waiting for keeper execution...');
+    }
+  }, [isConfirmed, txHash, queryClient]);
 
   const createOrder = async (params: CreateOrderParams) => {
     if (!walletClient || !address) {

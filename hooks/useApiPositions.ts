@@ -16,7 +16,8 @@ export function useApiPositions(address: `0x${string}` | undefined) {
     queryKey: ['apiPositions', address],
     queryFn: () => apiClient.getPositions(address || ''),
     enabled: !!address,
-    refetchInterval: 5000,
+    refetchInterval: 2000, // Fast refresh for better real-time updates
+    refetchOnWindowFocus: true,
   });
 
   const positions = useMemo<Position[]>(() => {

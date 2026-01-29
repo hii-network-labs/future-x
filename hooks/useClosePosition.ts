@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useWalletClient, useWaitForTransactionReceipt } from 'wagmi';
 import { encodeFunctionData, parseUnits } from 'viem';
 import toast from 'react-hot-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import { CONTRACTS, FEES, getTokenDecimals } from '../constants';
 import { MULTICALL_ABI } from '../constants/abis';
 import { useGmxProtocol } from './useGmxProtocol';
@@ -20,6 +21,7 @@ export const useClosePosition = () => {
   const { data: walletClient } = useWalletClient();
   const [isClosing, setIsClosing] = useState(false);
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
+  const queryClient = useQueryClient();
   
   // Need prices for acceptablePrice calculation
   const { prices } = useGmxProtocol(walletClient?.account.address || null);
@@ -27,6 +29,19 @@ export const useClosePosition = () => {
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash: txHash,
   });
+
+  // 🔄 Invalidate position caches when close transaction is confirmed
+  useEffect(() => {
+    if (isConfirmed && txHash) {
+      console.log('✅ Close position confirmed - invalidating position caches');
+      // Invalidate all position-related queries to trigger refetch
+      queryClient.invalidateQueries({ queryKey: ['apiPositions'] });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      queryClient.invalidateQueries({ queryKey: ['positionHistory'] });
+      // Show success message
+      toast.success('Position closed successfully!');
+    }
+  }, [isConfirmed, txHash, queryClient]);
 
   const closePosition = async (params: ClosePositionParams) => {
     if (!walletClient) {

@@ -17,10 +17,11 @@ const Header: React.FC<HeaderProps> = ({ chainState }) => {
   };
 
   return (
-    <header className="h-16 border-b border-gray-800 bg-[#111827] flex items-center justify-between px-6 sticky top-0 z-50">
-      <div className="flex items-center space-x-4">
-          <div className="flex items-center gap-6">
-            <h1 className="text-lg font-bold text-white leading-tight">Futures Trading</h1>
+    <header className="h-16 border-b border-gray-800 bg-[#111827] flex items-center justify-between px-6 sticky top-0 z-50 gap-4">
+      {/* Left section - Navigation */}
+      <div className="flex items-center gap-4 min-w-0 flex-1">
+          <div className="flex items-center gap-4 shrink-0">
+            <h1 className="text-lg font-bold text-white leading-tight whitespace-nowrap">Futures Trading</h1>
             
             {/* Navigation Tabs */}
             <nav className="flex items-center space-x-1 bg-gray-900/50 p-1 rounded-lg border border-gray-800/50">
@@ -29,19 +30,20 @@ const Header: React.FC<HeaderProps> = ({ chainState }) => {
               <NavLink to="/portfolio" label="Portfolio" />
             </nav>
           </div>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-400 whitespace-nowrap hidden lg:block">
             {CHAIN_NAME} <span className="text-gray-600">·</span> Chain ID {CHAIN_ID}
           </p>
 
         
-        <div className="hidden md:flex items-center space-x-3 ml-8 border-l border-gray-800 pl-8">
+        <div className="hidden xl:flex items-center gap-3 ml-4 border-l border-gray-800 pl-4 shrink-0">
           <StatusIndicator label="Network" status={systemStatus.network === 'Connected' ? 'success' : 'error'} value={CHAIN_NAME} />
           <StatusIndicator label="Oracle" status="success" value="Fresh" />
           <StatusIndicator label="Keeper" status="success" value="Online" />
         </div>
       </div>
 
-      <div className="flex items-center space-x-4">
+      {/* Right section - Wallet */}
+      <div className="flex items-center shrink-0">
         <ConnectButton 
           chainStatus="icon"
           showBalance={false}
