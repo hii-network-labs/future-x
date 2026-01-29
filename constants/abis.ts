@@ -384,6 +384,61 @@ export const READER_ABI = [
       },
     ],
   },
+  // Get deposit amount out (accurate estimation with price impact)
+  {
+    name: 'getDepositAmountOut',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dataStore', type: 'address' },
+      {
+        name: 'market',
+        type: 'tuple',
+        components: [
+          { name: 'marketToken', type: 'address' },
+          { name: 'indexToken', type: 'address' },
+          { name: 'longToken', type: 'address' },
+          { name: 'shortToken', type: 'address' },
+        ],
+      },
+      {
+        name: 'prices',
+        type: 'tuple',
+        components: [
+          {
+            name: 'indexTokenPrice',
+            type: 'tuple',
+            components: [
+              { name: 'min', type: 'uint256' },
+              { name: 'max', type: 'uint256' },
+            ],
+          },
+          {
+            name: 'longTokenPrice',
+            type: 'tuple',
+            components: [
+              { name: 'min', type: 'uint256' },
+              { name: 'max', type: 'uint256' },
+            ],
+          },
+          {
+            name: 'shortTokenPrice',
+            type: 'tuple',
+            components: [
+              { name: 'min', type: 'uint256' },
+              { name: 'max', type: 'uint256' },
+            ],
+          },
+        ],
+      },
+      { name: 'longTokenAmount', type: 'uint256' },
+      { name: 'shortTokenAmount', type: 'uint256' },
+      { name: 'uiFeeReceiver', type: 'address' },
+      { name: 'swapPricingType', type: 'uint8' },
+      { name: 'includeVirtualInventoryImpact', type: 'bool' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ];
 
 export const ERC20_ABI = [

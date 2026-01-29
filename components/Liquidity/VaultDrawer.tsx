@@ -10,6 +10,7 @@ import { useCreateWithdrawal } from '../../hooks/useCreateWithdrawal';
 import { useTokenApproval } from '../../hooks/useTokenApproval';
 import { useLiquidityHistory } from '../../hooks/useLiquidityHistory';
 import { useOptimalDeposit } from '../../hooks/useOptimalDeposit';
+import { useDepositEstimate } from '../../hooks/useDepositEstimate';
 import toast from 'react-hot-toast';
 
 interface VaultDrawerProps {
@@ -80,6 +81,18 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
       toast.success(`Optimal: ${optimalDeposit.longAmount} Long + ${optimalDeposit.shortAmount} Short`, { icon: '✨' });
     }
   };
+  
+  // Accurate Deposit Estimate from Reader contract
+  const { data: depositEstimate, isLoading: isEstimating } = useDepositEstimate({
+    marketAddress: vault.marketData?.marketToken,
+    longTokenAddress: vault.marketData?.longToken,
+    shortTokenAddress: vault.marketData?.shortToken,
+    indexTokenAddress: vault.marketData?.indexToken,
+    longAmount: depositMode === 'short' ? '0' : amountLong,
+    shortAmount: depositMode === 'long' ? '0' : amountShort,
+    longDecimals: 18,
+    shortDecimals: 6,
+  });
   
   // Destructure isConfirmed and txHash for Toasts
   const { 
@@ -562,6 +575,38 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
                         <button onClick={() => setWithdrawAmount(liquidityData?.userGmBalance || '0')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-gray-800 px-2 py-1 rounded text-gray-400 hover:text-white">MAX</button>
                     </div>
                     {getError(withdrawAmount, liquidityData?.userGmBalance) && <div className="text-[10px] text-red-400 mt-1 font-bold">{getError(withdrawAmount, liquidityData?.userGmBalance)}</div>}
+                </div>
+              )}
+
+              {/* Price Impact Indicator (Add Liquidity Only) */}
+              {activeTab === 'add' && depositEstimate && (
+                <div className={`p-3 rounded-lg border ${
+                  depositEstimate.impactLevel === 'positive' ? 'bg-emerald-500/20 border-emerald-500/30' :
+                  depositEstimate.impactLevel === 'negative' ? 'bg-red-500/20 border-red-500/30' :
+                  'bg-yellow-500/20 border-yellow-500/30'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      {isEstimating ? 'Calculating...' : 'Price Impact (On-Chain)'}
+                    </span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      depositEstimate.impactLevel === 'positive' ? 'bg-emerald-500/20 text-emerald-400' :
+                      depositEstimate.impactLevel === 'negative' ? 'bg-red-500/20 text-red-400' :
+                      'bg-yellow-500/20 text-yellow-400'
+                    }`}>
+                      {depositEstimate.impactLabel}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-[10px]">
+                    <div>
+                      <span className="text-gray-500">You Receive</span>
+                      <div className="font-bold text-white">${depositEstimate.estimatedUsd.toFixed(2)}</div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-gray-500">Est. GM Tokens</span>
+                      <div className="font-bold text-white">{parseFloat(depositEstimate.estimatedGmTokens).toFixed(4)} GM</div>
+                    </div>
+                  </div>
                 </div>
               )}
 
