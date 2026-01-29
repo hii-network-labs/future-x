@@ -9,6 +9,7 @@ import { useCreateDeposit } from '../../hooks/useCreateDeposit';
 import { useCreateWithdrawal } from '../../hooks/useCreateWithdrawal';
 import { useTokenApproval } from '../../hooks/useTokenApproval';
 import { useLiquidityHistory } from '../../hooks/useLiquidityHistory';
+import { useOptimalDeposit } from '../../hooks/useOptimalDeposit';
 import toast from 'react-hot-toast';
 
 interface VaultDrawerProps {
@@ -28,6 +29,9 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
   const [amountShort, setAmountShort] = useState('');
   // Withdraw State
   const [withdrawAmount, setWithdrawAmount] = useState('');
+  
+  // Optimal Deposit State
+  const [totalUsdInput, setTotalUsdInput] = useState('');
 
   // Determine Token Addresses
   const longTokenAddress = vault.marketData?.longToken;
@@ -61,6 +65,21 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     vault.marketData?.shortToken
   );
   const { data: historyData } = useLiquidityHistory(address);
+  
+  // Optimal Deposit Calculator Hook
+  const { data: optimalDeposit, isLoading: isCalculating } = useOptimalDeposit({
+    marketAddress: vault.marketData?.marketToken,
+    totalUsd: parseFloat(totalUsdInput) || 0,
+  });
+  
+  // Auto-fill function for optimal deposit
+  const handleCalculateOptimal = () => {
+    if (optimalDeposit) {
+      setAmountLong(optimalDeposit.longAmount);
+      setAmountShort(optimalDeposit.shortAmount);
+      toast.success(`Optimal: ${optimalDeposit.longAmount} Long + ${optimalDeposit.shortAmount} Short`, { icon: '✨' });
+    }
+  };
   
   // Destructure isConfirmed and txHash for Toasts
   const { 
@@ -411,6 +430,53 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
                          Pair
                       </button>
                   </div>
+              )}
+
+              {/* Optimal Deposit Calculator (Only in Pair Mode) */}
+              {activeTab === 'add' && depositMode === 'pair' && (
+                <div className="bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 border border-emerald-500/20 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">⚡ Zero Impact Deposit</span>
+                    {optimalDeposit?.poolImbalance && (
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full ${
+                        optimalDeposit.poolImbalance.isBalanced 
+                          ? 'bg-emerald-500/20 text-emerald-400' 
+                          : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        Pool: {optimalDeposit.poolImbalance.longPercentage.toFixed(0)}% / {optimalDeposit.poolImbalance.shortPercentage.toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        value={totalUsdInput}
+                        onChange={(e) => handleAmountChange(e, setTotalUsdInput)}
+                        placeholder="Total USD to deposit"
+                        className="w-full bg-black/40 border border-gray-700 rounded-lg pl-7 pr-4 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500/50 transition-colors"
+                      />
+                    </div>
+                    <button 
+                      onClick={handleCalculateOptimal}
+                      disabled={!optimalDeposit || isCalculating}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap"
+                    >
+                      {isCalculating ? '...' : 'Calculate'}
+                    </button>
+                  </div>
+                  
+                  {optimalDeposit && parseFloat(totalUsdInput) > 0 && (
+                    <div className="text-[10px] text-gray-400 flex justify-between">
+                      <span>≈ {optimalDeposit.longAmount} {longSymbol}</span>
+                      <span>+</span>
+                      <span>≈ {optimalDeposit.shortAmount} USDC</span>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Input Fields */}
