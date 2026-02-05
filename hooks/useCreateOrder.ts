@@ -248,7 +248,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         }
       }
 
-      toast.success('Order submitted! Waiting for keeper execution...');
+      // toast.success('Order submitted! Waiting for keeper execution...');
       console.log('✅ Transaction confirmed:', hash);
 
       return hash;
