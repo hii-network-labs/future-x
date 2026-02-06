@@ -1,6 +1,7 @@
 import React from 'react';
 import { formatUnits } from 'viem';
 import { EXPLORER_URL } from '../constants';
+import FeeBreakdown from './FeeBreakdown';
 
 interface TradeHistoryPanelProps {
   trades: any[];
@@ -19,13 +20,7 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
   totalPages = 1,
   onPageChange 
 }) => {
-  // ... (getActionInfo and formatDate functions remain distinct/unchanged, we skip them in replacement content if possible, but strict replace needs exact match)
-  // To avoid huge match block, I will just match the top part.
-  
-  // Wait, I need to match the return block safely.
-  // Let's rely on the previous tool call context. I will select a range that covers the header.
-
-    const getActionInfo = (trade: any) => {
+  const getActionInfo = (trade: any) => {
     const type = parseInt(trade.orderType);
     const isLong = trade.isLong;
     const event = trade.eventName;
@@ -33,9 +28,11 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
     // DEBUG LOG
     if (type >= 4 && type <= 6) {
       console.log(`[TradeHistory] Decrease Trade ${trade.id}:`, {
-         type, isLong, event, 
+         type, 
+         isLongRaw: trade.isLong,
+         isLongType: typeof trade.isLong,
+         event, 
          market: trade.marketAddress,
-         collateral: trade.initialCollateralTokenAddress
       });
     }
 
@@ -161,22 +158,51 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {trades.map((trade) => {
+              {trades.map((trade, index) => {
                 const action = getActionInfo(trade);
-                // PnL and Size use 30 decimals
-                const sizeDeltaUsd = trade.sizeDeltaUsd ? Number(formatUnits(BigInt(trade.sizeDeltaUsd), 30)) : 0;
-                const pnlUsd = trade.pnlUsd ? Number(formatUnits(BigInt(trade.pnlUsd), 30)) : 0;
+                const isBottomRow = index >= trades.length - 3 && trades.length > 5; // Use bottom alignment for last 3 rows if table is large enough
                 
-                // executionPrice in this subgraph appears to use 12 decimals (e.g. 5000*10^12 for 5000 USD)
-                // Standard GMX is 30, but empirical data shows 12 here.
-                const executionPrice = trade.executionPrice 
-                  ? Number(formatUnits(BigInt(trade.executionPrice), 12)) 
-                  : 0;
+                // ... (existing format functions remain same, I will skip them in replacement content to focus on the return, but tool requires contiguous block?)
+                // Actually I can just update the rendering part if I use 'index' which is already in map args (implied).
+                // Wait, I need to insert the logic variable.
                 
-                // Don't show Price/PnL for cancelled orders if 0
+                // Helper function to auto-detect and format USD values from subgraph
+                const formatUsdValue = (rawValue: string | null, fieldName: string): number => {
+                   // ... (keep implementation same as before effectively)
+                   if (!rawValue) return 0;
+                   try {
+                     const raw = BigInt(rawValue);
+                     const absRaw = raw >= 0n ? raw : -raw;
+                     const threshold30 = BigInt(10) ** BigInt(25);
+                     const threshold18 = BigInt(10) ** BigInt(15);
+                     if (absRaw > threshold30) return Number(formatUnits(raw, 30));
+                     if (absRaw > threshold18) return Number(formatUnits(raw, 18));
+                     const try12 = Number(formatUnits(raw, 12));
+                     return (Math.abs(try12) > 0.01 && Math.abs(try12) < 1e8) ? try12 : Number(raw) / 1e6;
+                   } catch { return 0; }
+                };
+                
+                const sizeDeltaUsd = formatUsdValue(trade.sizeDeltaUsd, 'sizeDeltaUsd');
+                const finalPnlUsd = formatUsdValue(trade.pnlUsd, 'pnlUsd');
+                
+                let executionPrice = 0;
+                if (trade.executionPrice) {
+                  // ... (re-implement logic briefly for replacement context or assume it's part of replacement)
+                  // To keep it clean, I will just replace the map contents.
+                   const rawPrice = BigInt(trade.executionPrice);
+                   const threshold = BigInt(10) ** BigInt(25);
+                   if (rawPrice > threshold) executionPrice = Number(formatUnits(rawPrice, 30));
+                   else executionPrice = Number(formatUnits(rawPrice, 12)); // Legacy
+                   
+                   if (executionPrice > 1e10 || executionPrice < 0.0001) {
+                      const try18 = Number(formatUnits(rawPrice, 18));
+                      if (try18 > 0.01 && try18 < 1e8) executionPrice = try18;
+                   }
+                }
+
                 const showPrice = trade.eventName === 'OrderExecuted' && executionPrice > 0;
                 const showPnl = trade.eventName === 'OrderExecuted' && (
-                  parseInt(trade.orderType) >= 4 || parseInt(trade.orderType) === 7 // Decrease or Liquidation
+                  parseInt(trade.orderType) >= 4 || parseInt(trade.orderType) === 7
                 );
 
                 return (
@@ -212,8 +238,23 @@ const TradeHistoryPanel: React.FC<TradeHistoryPanelProps> = ({
                     </td>
                     <td className="px-6 py-4 text-right">
                       {showPnl ? (
-                        <div className={`text-sm font-bold ${pnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {pnlUsd >= 0 ? '+' : ''}${pnlUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <div className="flex flex-col items-end relative group cursor-help">
+                            {/* Value Display */}
+                            <div className={`text-sm font-bold flex items-center gap-1 ${finalPnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'} border-b border-dashed border-gray-600`}>
+                              {finalPnlUsd >= 0 ? '+' : ''}${finalPnlUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </div>
+
+                            {/* Tooltip: Dynamic Position based on Row Index */}
+                            <div className={`hidden group-hover:block absolute right-full mr-3 min-w-[250px] z-[100] ${isBottomRow ? 'bottom-0' : 'top-0'}`}>
+                                <FeeBreakdown 
+                                    positionFee={trade.positionFeeFormatted || 0}
+                                    borrowingFee={trade.borrowingFeeFormatted || 0}
+                                    fundingFee={trade.fundingFeeFormatted || 0}
+                                    executionFee={trade.executionFeeFormatted || 0}
+                                    priceImpact={trade.priceImpactUsdFormatted || 0}
+                                    basePnl={trade.pnlUsdFormatted || 0}
+                                />
+                            </div>
                         </div>
                       ) : (
                          <div className="text-xs text-gray-600">-</div>

@@ -4,10 +4,10 @@ import { MarketSide, Position, PendingOrder, Vault, LPPosition, OrderType, Order
 // Environment-based Configuration (Vite uses import.meta.env)
 export const CHAIN_ID = parseInt(import.meta.env.VITE_CHAIN_ID || '22469');
 export const CHAIN_NAME = import.meta.env.VITE_CHAIN_NAME || "Custom GMX";
-export const RPC_URL = import.meta.env.VITE_RPC_URL || "http://115.75.100.60:8545";
+export const RPC_URL = import.meta.env.VITE_RPC_URL || "https://rpc-public.teknix.dev";
 export const KEEPER_API_URL = import.meta.env.VITE_KEEPER_API_URL || "http://localhost:9090";
 export const EXPLORER_URL = import.meta.env.VITE_EXPLORER_URL || "https://arbiscan.io";
-export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "http://217.216.75.181:8080";
+export const SUBGRAPH_URL = import.meta.env.VITE_SUBGRAPH_URL || "https://subgraph-gmx.teknix.dev";
 
 export const CONTRACTS = {
   market: import.meta.env.VITE_MARKET_ADDRESS || "0x68dE251394Ccfda893Cc6796B68e5A8b6944F66e",
@@ -38,30 +38,81 @@ export const getTokenDecimals = (address: string) => {
 export const GMX_DECIMALS = 30;
 export const USDC_DECIMALS = 6;
 
-// Helper to format GMX prices (handles both 18-decimal Keeper format and 30-decimal standard)
-export const formatGmxPrice = (priceStr?: string) => {
+// Helper to format GMX prices from keeper API
+// Keeper returns: priceUsd * 10^(30 - tokenDecimals)
+// - WNT (18 dec): 1110 USD -> 1110 * 10^12 = 1.11e15
+// - USDC (6 dec): 1 USD -> 1 * 10^24 = 1e24
+//
+// @param priceStr - The raw price string from API
+// @param tokenDecimals - Optional. Token decimals (18 for WNT, 6 for USDC). 
+//                        If provided, uses exact formula. If not, estimates from magnitude.
+export const formatGmxPrice = (priceStr?: string | number, tokenDecimals?: number): number => {
   if (!priceStr) return 0;
+  
+  // Convert number to string to avoid BigInt errors
+  const str = priceStr.toString();
+  
   try {
-    const val = BigInt(priceStr);
+    // If scientific notation (e.g. 1.2e+22), BigInt might fail. 
+    // If it's a small float (0.05), BigInt fails.
+    // If it's a huge integer string, BigInt works.
     
-    // Auto-detect format based on magnitude
-    // If value > 1e25, it's likely 30 decimals
-    // If value < 1e25, it's likely 18 decimals (Keeper reduced precision)
-    const threshold = BigInt(10) ** BigInt(25);
-    
-    if (val > threshold) {
-      // Standard GMX 30 decimals
-      const divisor = BigInt(10) ** BigInt(GMX_DECIMALS - 2);
-      return Number(val / divisor) / 100;
-    } else {
-      // Keeper reduced precision (18 decimals)
-      const divisor = BigInt(10) ** BigInt(18 - 2);
-      return Number(val / divisor) / 100;
+    // Check if it's already a small float?
+    if (str.includes('.') && !str.includes('e')) {
+       const f = parseFloat(str);
+       if (Math.abs(f) < 1000000000) return f; // It's likely already formatted
     }
-  } catch {
+    
+    // Handle Scientific Notation by expanding it? 
+    // Or just let BigInt try. BigInt("1.2e+22") throws.
+    
+    let val: bigint;
+    try {
+      val = BigInt(str);
+    } catch {
+       // Fallback for floats/scientific
+       return parseFloat(str);
+    }
+    
+    if (val === 0n) return 0;
+    
+    let precision: number;
+    
+    if (tokenDecimals !== undefined) {
+      precision = 30 - tokenDecimals;
+    } else {
+      const digits = str.length;
+      
+      // Bucket by digit count
+      if (digits >= 27) {
+        precision = 30; // 1e30 range
+      } else if (digits >= 20) {
+        precision = 24; // 1e24 range (USDC 6 dec) -> 10^20 is $0.0001
+      } else if (digits >= 11) {
+        precision = 12; // 1e12 range (WNT 18 dec)
+      } else {
+        precision = 0; // Assume strictly formatted
+        return Number(val);
+      }
+    }
+    
+    const divisor = BigInt(10) ** BigInt(precision > 2 ? precision - 2 : 0);
+    const num = Number(val / divisor);
+    const result = precision > 2 ? num / 100 : num;
+    
+    // Log suspicious results
+    if (result === 0) {
+        console.warn(`[formatGmxPrice] Result is 0. Input: ${str}, Decimals: ${tokenDecimals}, Precision: ${precision}`);
+    }
+    
+    return result;
+    
+  } catch (e) {
+    console.error(`[formatGmxPrice] Error parsing ${str}:`, e);
     return 0;
   }
 };
+
 
 export const COLORS = {
   bg: "#0C111A",
@@ -108,28 +159,40 @@ export const MOCK_VAULTS: Vault[] = [
     utilization: 64.5,
     pnl24h: 12500,
     risk: 'Low',
+    marketData: {
+        marketToken: CONTRACTS.market as `0x${string}`,
+        indexToken: CONTRACTS.wnt as `0x${string}`,
+        longToken: CONTRACTS.wnt as `0x${string}`,
+        shortToken: CONTRACTS.usdc as `0x${string}`,
+        name: 'ETH-USD',
+        indexSymbol: 'WNT',
+        longSymbol: 'WNT',
+        shortSymbol: 'USDC',
+        isActive: true
+    }
   },
   {
-    id: 'btc-vault',
-    name: 'BTC Alpha Vault',
+    id: 'gmx-vault',
+    name: 'GMX Core Vault',
     token: 'USDC',
-    tokenAddress: CONTRACTS.market,
-    markets: ['BTC-USD'],
-    totalLiquidity: 15200000,
-    utilization: 72.1,
-    pnl24h: -4200,
-    risk: 'Medium',
-  },
-  {
-    id: 'multi-asset',
-    name: 'DeFi Index Vault',
-    token: 'USDC',
-    markets: ['SOL-USD', 'ARB-USD', 'LINK-USD'],
-    totalLiquidity: 1950000,
-    utilization: 89.2,
-    pnl24h: 38500,
+    tokenAddress: "0x121116C613a78A82de601803d40203bA364E7BCf",
+    markets: ['GMX-USD'],
+    totalLiquidity: 10000000,
+    utilization: 10.5,
+    pnl24h: 200,
     risk: 'High',
-  }
+    marketData: {
+        marketToken: "0x121116C613a78A82de601803d40203bA364E7BCf" as `0x${string}`,
+        indexToken: "0xEFB08a9589b6238441935185FDf5B57B6101466f" as `0x${string}`, // GMX
+        longToken: "0xEFB08a9589b6238441935185FDf5B57B6101466f" as `0x${string}`, // GMX
+        shortToken: CONTRACTS.usdc as `0x${string}`,
+        name: 'GMX-USD',
+        indexSymbol: 'GMX',
+        longSymbol: 'GMX',
+        shortSymbol: 'USDC',
+        isActive: true
+    }
+  },
 ];
 
 // Fix: Added missing MOCK_LP_POSITIONS constant for LiquidityConsole

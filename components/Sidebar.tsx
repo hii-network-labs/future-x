@@ -12,8 +12,8 @@ const Sidebar: React.FC = () => {
       
       <nav className="flex-1 py-6 px-3 space-y-2">
         <SidebarItem to="/trade" icon={<TradeIcon />} label="Trade" />
-        <SidebarItem to="/portfolio" icon={<PortfolioIcon />} label="Portfolio" />
         <SidebarItem to="/liquidity" icon={<LiquidityIcon />} label="Liquidity" />
+        <SidebarItem to="/portfolio" icon={<PortfolioIcon />} label="Portfolio" />
         <div className="pt-4 mt-4 border-t border-gray-800/50">
           <SidebarItem to="/docs" icon={<DocsIcon />} label="Documentation" />
         </div>

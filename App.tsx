@@ -11,6 +11,7 @@ import LiquidityConsole from './components/LiquidityConsole';
 import WrongChainBanner from './components/WrongChainBanner';
 import { MarketProvider } from './contexts/MarketContext';
 import { CHAIN_ID, CHAIN_NAME } from './constants';
+import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
 const App: React.FC = () => {
   // Real wallet connection using wagmi
@@ -24,6 +25,9 @@ const App: React.FC = () => {
     isCorrectChain: chainId === CHAIN_ID,
     name: chainId === CHAIN_ID ? CHAIN_NAME : 'Wrong Network',
   };
+
+  // 🔌 Connect to real-time events WebSocket when wallet is connected
+  useRealtimeEvents(isConnected && chainState.isCorrectChain ? address : undefined);
 
   return (
     <HashRouter>
@@ -53,6 +57,7 @@ const App: React.FC = () => {
         </div>
       </div>
       <Toaster position="top-right" toastOptions={{
+        duration: 4000,
         style: {
           background: '#1f2937',
           color: '#fff',

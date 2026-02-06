@@ -1,10 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWalletClient, useConfig, usePublicClient, useWaitForTransactionReceipt } from 'wagmi';
 import { encodeFunctionData, parseUnits, type Hex } from 'viem';
+import { useQueryClient } from '@tanstack/react-query';
 import { MULTICALL_ABI } from '../constants/abis';
 import { CONTRACTS, FEES, CHAIN_ID } from '../constants';
 import toast from 'react-hot-toast';
 import { estimateExecutionFee, GAS_LIMITS, formatExecutionFee } from '../utils/gasUtils';
+
+const API_BASE = import.meta.env.VITE_KEEPER_API_URL || 'http://localhost:3000';
+
+// Cache for token decimals to avoid repeated API calls
+const decimalsCache: Record<string, number> = {};
+
+/**
+ * Fetch token decimals from keeper API (with caching)
+ */
+async function getTokenDecimals(tokenAddress: string): Promise<number> {
+  const key = tokenAddress.toLowerCase();
+  
+  // Return cached value if available
+  if (decimalsCache[key] !== undefined) {
+    return decimalsCache[key];
+  }
+  
+  try {
+    const response = await fetch(`${API_BASE}/tokens/${tokenAddress}`);
+    if (response.ok) {
+      const result = await response.json();
+      const data = result.data || result;
+      if (data.decimals !== undefined) {
+        decimalsCache[key] = data.decimals;
+        return data.decimals;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to fetch token decimals, defaulting to 18:', e);
+  }
+  
+  // Default to 18 if API fails
+  return 18;
+}
 
 interface CreateOrderParams {
   market: `0x${string}`;         // Market address (from selected market)
@@ -23,6 +58,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
   const { data: walletClient } = useWalletClient();
   const config = useConfig();
   const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
   const [txHash, setTxHash] = useState<Hex | undefined>();
   const [isCreating, setIsCreating] = useState(false);
 
@@ -30,6 +66,19 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
     hash: txHash,
   });
+
+  // 🔄 Invalidate position caches when order creation is confirmed
+  // Note: Order creation confirmed means order is in queue, not yet executed by keeper
+  // But we still want to refresh to show pending order status
+  useEffect(() => {
+    if (isConfirmed && txHash) {
+      console.log('✅ Order creation confirmed - invalidating position caches');
+      // Invalidate position queries to catch keeper execution faster
+      queryClient.invalidateQueries({ queryKey: ['apiPositions'] });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      toast.success('Order submitted! Waiting for keeper execution...');
+    }
+  }, [isConfirmed, txHash, queryClient]);
 
   const createOrder = async (params: CreateOrderParams) => {
     if (!walletClient || !address) {
@@ -66,7 +115,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
           callbackContract: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           uiFeeReceiver: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           market: params.market, // Usually matches the market address
-          initialCollateralToken: params.isLong ? (CONTRACTS.wnt as `0x${string}`) : params.collateralToken, // Force WNT for Long
+          initialCollateralToken: params.collateralToken, // Use selected token
           swapPath: [] as `0x${string}`[],
         },
         numbers: {
@@ -82,11 +131,21 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         orderType: 2, // Market Increase
         decreasePositionSwapType: 0,
         isLong: params.isLong,
-        shouldUnwrapNativeToken: params.isLong, // Unwrap WNT for Longs (if user sends ETH)
+        shouldUnwrapNativeToken: params.isLong, // Keep unwrapping for Longs logic (defaults)
         autoCancel: false,
         referralCode: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         dataList: [] as `0x${string}`[],
       };
+      
+      // DEBUG: Log key checks for OrderNotFulfillableAtAcceptablePrice
+      console.log('🔍 Acceptable Price Check:', {
+           acceptablePrice: orderParams.numbers.acceptablePrice.toString(),
+           expectedExecutionPrice: params.currentPrice,
+           isLong: params.isLong,
+           slippageCheck: params.isLong 
+              ? `${orderParams.numbers.acceptablePrice} > ExecutionPrice?` 
+              : `${orderParams.numbers.acceptablePrice} < ExecutionPrice?`
+      });
 
       // Encode multicall functions
       const calls: `0x${string}`[] = [];
@@ -99,12 +158,20 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         args: [CONTRACTS.orderVault as `0x${string}`, executionFee],
       }));
 
+      // Determine payment type
+      const isNativePayment = params.collateralToken.toLowerCase() === CONTRACTS.wnt.toLowerCase();
+
       // 2. Send Collateral
-      if (params.isLong) {
-        // For Long, we use ETH (WNT) as collateral
-        // User inputs collateral in USD, we need to convert to ETH amount
-        const collateralInEth = params.collateralAmount / params.currentPrice; // USD / (USD/ETH) = ETH
-        const wntCollateralAmount = parseUnits(collateralInEth.toFixed(18), 18); // ETH decimals
+      if (isNativePayment) {
+        // For Native ETH (WNT address used as placeholder)
+        // Input `collateralAmount` is already in TOKENS (ETH), not USD if coming from input.
+        // Wait - caller passes collateralAmount. 
+        // If isLong (ETH market), collateralAmount is ETH.
+        // If isShort (ETH market), collateralAmount is USDC.
+        
+        // Caution: params.collateralAmount is "number". 
+        // If isNativePayment, we treat it as 18 decimals.
+        const wntCollateralAmount = parseUnits(params.collateralAmount.toString(), 18); // ETH decimals
         
         // Update params with correct WNT amount
         orderParams.numbers.initialCollateralDeltaAmount = wntCollateralAmount;
@@ -117,14 +184,19 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         
         totalValue += wntCollateralAmount;
       } else {
-        // For Short, we use USDC (standard logic)
+        // For ERC20 tokens - fetch decimals dynamically from API
+        const decimals = await getTokenDecimals(params.collateralToken);
+        
+        const tokenCollateralAmount = parseUnits(params.collateralAmount.toString(), decimals);
+        orderParams.numbers.initialCollateralDeltaAmount = tokenCollateralAmount;
+
         calls.push(encodeFunctionData({
           abi: MULTICALL_ABI,
           functionName: 'sendTokens',
           args: [
-            CONTRACTS.usdc as `0x${string}`,
+            params.collateralToken,
             CONTRACTS.orderVault as `0x${string}`,
-            collateralDeltaAmount,
+            tokenCollateralAmount,
           ],
         }));
       }
@@ -143,21 +215,22 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         size: params.sizeDeltaUsd,
         isLong: params.isLong,
         totalValue,
+        isNativePayment
       });
 
-      // SAFETY CHECK: Verify Allowance Logic (only for USDC/Short)
-      if (!params.isLong && publicClient) {
-        // ... (Keep existing allowance logic but simpler reference)
-         // @ts-ignore
-         const allowance = await publicClient.readContract({
-            address: CONTRACTS.usdc as `0x${string}`, // Force USDC address for Short check
+      // SAFETY CHECK: Verify Allowance Logic (only for ERC20)
+      if (!isNativePayment && publicClient) {
+         const tokenCollateralAmount = orderParams.numbers.initialCollateralDeltaAmount;
+          // @ts-ignore
+          const allowance = await publicClient.readContract({
+            address: params.collateralToken, 
             abi: [{ name: 'allowance', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] }] as const,
             functionName: 'allowance',
             args: [address, CONTRACTS.router as `0x${string}`],
           }) as bigint;
 
-          if (allowance < collateralDeltaAmount) {
-             toast.error('Insufficient allowance! Please approve USDC.');
+          if (allowance < tokenCollateralAmount) {
+             toast.error('Insufficient allowance! Please approve token.');
              throw new Error('Insufficient allowance.');
           }
       }
@@ -185,7 +258,7 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         }
       }
 
-      toast.success('Order submitted! Waiting for keeper execution...');
+      // toast.success('Order submitted! Waiting for keeper execution...');
       console.log('✅ Transaction confirmed:', hash);
 
       return hash;
@@ -193,7 +266,8 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
       console.error('❌ Order creation failed:', error);
       
       // User-friendly error messages
-      if (error.message?.includes('User rejected')) {
+      if (error.message?.toLowerCase().includes('user rejected') || 
+          error.message?.toLowerCase().includes('user denied')) {
         toast.error('Transaction cancelled');
       } else if (error.message?.includes('insufficient funds')) {
         toast.error('Insufficient funds for gas');

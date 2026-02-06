@@ -1,6 +1,7 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Position, MarketSide } from '../types';
+// import ClosePositionModal from './ClosePositionModal'; // Disabled until Apollo setup
 
 interface PositionsPanelProps {
   positions: Position[];
@@ -10,6 +11,9 @@ interface PositionsPanelProps {
 }
 
 const PositionsPanel: React.FC<PositionsPanelProps> = ({ positions, onClose, showHeader = true, isLoading = false }) => {
+  // Modal disabled temporarily - Apollo Client not setup yet
+  // const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  
   return (
     <div className="bg-[#111827] border border-gray-800 rounded-xl overflow-hidden min-h-[300px]">
       {showHeader && (
@@ -56,7 +60,7 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({ positions, onClose, sho
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-gray-200">${pos.size.toLocaleString()}</div>
-                    <div className="text-[10px] text-gray-500">{pos.collateral.toFixed(2)} Collateral</div>
+                    <div className="text-[10px] text-gray-500">${pos.collateral.toFixed(2)} Collateral</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-sm font-medium text-gray-300">${pos.entryPrice.toFixed(2)}</div>
@@ -88,6 +92,17 @@ const PositionsPanel: React.FC<PositionsPanelProps> = ({ positions, onClose, sho
           </table>
         </div>
       )}
+      
+      {/* Close Position Modal - Disabled until Apollo Client setup
+      {selectedPosition && (
+        <ClosePositionModal
+          position={selectedPosition}
+          isOpen={!!selectedPosition}
+          onClose={handleModalClose}
+          onSuccess={handleCloseSuccess}
+        />
+      )}
+      */}
     </div>
   );
 };

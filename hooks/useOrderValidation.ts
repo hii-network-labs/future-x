@@ -26,9 +26,10 @@ export function useOrderValidation(
   address: `0x${string}` | undefined,
   collateralInput: string,
   leverage: number,
-  collateralTokenAddress: `0x${string}` | undefined
+  collateralTokenAddress: `0x${string}` | undefined,
+  tokenPrice: number // New prop: Price of the collateral token in USD
 ): ValidationResult {
-  const { balanceRaw: tokenBalanceRaw, symbol } = useTokenBalance(address, collateralTokenAddress);
+  const { balanceRaw: tokenBalanceRaw, symbol, decimals } = useTokenBalance(address, collateralTokenAddress);
   const { balanceRaw: ethBalanceRaw } = useETHBalance(address);
   const { minCollateralUsd } = useMinCollateral();
 
@@ -36,26 +37,12 @@ export function useOrderValidation(
     // Parse collateral amount
     const collateralNum = parseFloat(collateralInput);
     
-    // Check for invalid input
-    if (isNaN(collateralNum) || collateralInput.trim() === '') {
-      return {
-        errors: {
-          insufficientCollateral: false,
-          belowMinimum: false,
-          belowMinCollateral: false,
-          insufficientGas: false,
-          leverageTooHigh: false,
-          invalidAmount: true,
-        },
-        isValid: false,
-        errorMessage: 'Enter collateral amount',
-      };
-    }
+    // ... (rest of check)
 
-    // Convert to raw units for comparison (USDC has 6 decimals)
+    // Convert to raw units using correct decimals
     let collateralRaw: bigint;
     try {
-      collateralRaw = parseUnits(collateralInput, 6);
+      collateralRaw = parseUnits(collateralInput, decimals);
     } catch {
       return {
         errors: {
@@ -77,11 +64,15 @@ export function useOrderValidation(
     // GMX V2 minimum collateral from DataStore + $1 buffer for fees
     const MIN_COLLATERAL_WITH_BUFFER = minCollateralUsd + 1;
 
+    // Calculate USD value of collateral
+    // For Stablecoins (USDC), price is ~1. For Native (HNC), price is current market price.
+    const collateralUsdValue = collateralNum * tokenPrice;
+
     // Validation checks
     const errors: ValidationErrors = {
       insufficientCollateral: collateralRaw > tokenBalanceRaw,
-      belowMinimum: collateralNum < 1,
-      belowMinCollateral: collateralNum < MIN_COLLATERAL_WITH_BUFFER,
+      belowMinimum: collateralUsdValue < 2, // Hard check for $2 USD minimum
+      belowMinCollateral: collateralUsdValue < MIN_COLLATERAL_WITH_BUFFER,
       insufficientGas: ethBalanceRaw < executionFeeRaw,
       leverageTooHigh: leverage > 50 || leverage < 1.1,
       invalidAmount: collateralNum <= 0,
@@ -108,7 +99,7 @@ export function useOrderValidation(
       isValid,
       errorMessage,
     };
-  }, [collateralInput, leverage, tokenBalanceRaw, ethBalanceRaw, symbol, minCollateralUsd]);
+  }, [collateralInput, leverage, tokenBalanceRaw, ethBalanceRaw, symbol, minCollateralUsd, tokenPrice]);
 
   return validation;
 }

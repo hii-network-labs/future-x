@@ -14,8 +14,10 @@ interface OrderPanelProps {
   onOpenOrder: (side: MarketSide, size: number, collateral: number, leverage: number) => void;
   isWalletConnected: boolean;
   isCreatingOrder?: boolean;
-  collateralTokenAddress: `0x${string}`;
+  collateralTokenAddress: `0x${string}` | undefined; // Undefined = Native Token (ETH)
   collateralTokenSymbol: string;
+  side: MarketSide;
+  onSideChange: (side: MarketSide) => void;
 }
 
 const OrderPanel: React.FC<OrderPanelProps> = ({ 
@@ -24,23 +26,31 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   isWalletConnected,
   isCreatingOrder = false,
   collateralTokenAddress,
-  collateralTokenSymbol
+  collateralTokenSymbol,
+  side,
+  onSideChange
 }) => {
   const { address } = useAccount();
   // Use dynamic token balance
   const { balance: tokenBalance, balanceRaw: tokenBalanceRaw, isLoading: balanceLoading } = useTokenBalance(address, collateralTokenAddress);
   
-  const [side, setSide] = useState<MarketSide>(MarketSide.LONG);
+  // const [side, setSide] = useState<MarketSide>(MarketSide.LONG); // Lifted up
   const [collateralAmount, setCollateralAmount] = useState('10');
   const [leverage, setLeverage] = useState(5);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Validation hook
-  const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage, collateralTokenAddress);
+  // Determine collateral price for validation
+  // If Long, collateral is usually Index Token (volatile)
+  // If Short, collateral is Stable (USDC) ($1)
+  const isGenericLong = side === MarketSide.LONG;
+  const validationPrice = isGenericLong ? currentPrice : 1;
 
-  // Token approval hook for USDC
+  // Validation hook
+  const { isValid, errorMessage } = useOrderValidation(address, collateralAmount, leverage, collateralTokenAddress, validationPrice);
+
+  // Token approval hook for USDC/ERC20
   const amountBigInt = collateralAmount && !isNaN(parseFloat(collateralAmount)) 
-    ? parseUnits(collateralAmount, 6) 
+    ? parseUnits(collateralAmount, 6) // Note: This defaults to 6 but validation handles errors. 
     : 0n;
 
   const {
@@ -49,16 +59,16 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
     isConfirming,
     approve,
   } = useTokenApproval({
-    tokenAddress: collateralTokenAddress, // Fix: Use dynamic token
+    tokenAddress: collateralTokenAddress || '0x0000000000000000000000000000000000000000', 
     spenderAddress: CONTRACTS.router as `0x${string}`,
     amount: amountBigInt
   });
 
-  const needsApproval = !isApproved;
+  const isNative = !collateralTokenAddress;
+  const needsApproval = !isNative && !isApproved;
   const handleApprove = approve;
 
-
-  const sizeUSD = Number(collateralAmount) * leverage;
+  const sizeUSD = Number(collateralAmount) * validationPrice * leverage;
   const keeperFee = 0.0025; // HNC
 
   // Get public client for waiting for tx
@@ -110,8 +120,15 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
   // MAX button handler
   const handleMaxClick = () => {
     if (tokenBalanceRaw > 0n) {
-      // Use actual balance from hook
-      setCollateralAmount(tokenBalance);
+      if (isNative) {
+         // Subtract 0.01 for Gas if Native
+         const val = parseFloat(tokenBalance);
+         const max = Math.max(0, val - 0.01);
+         setCollateralAmount(max.toFixed(4)); // Use toFixed(4) to match display precision
+      } else {
+         // Use actual balance (already floored by hook)
+         setCollateralAmount(tokenBalance);
+      }
     }
   };
 
@@ -120,13 +137,13 @@ const OrderPanel: React.FC<OrderPanelProps> = ({
       {/* Tabs */}
       <div className="flex h-12 border-b border-gray-800">
         <button 
-          onClick={() => setSide(MarketSide.LONG)}
+          onClick={() => onSideChange(MarketSide.LONG)}
           className={`flex-1 font-bold text-sm transition-all ${side === MarketSide.LONG ? 'bg-emerald-500 text-black' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
         >
           LONG
         </button>
         <button 
-          onClick={() => setSide(MarketSide.SHORT)}
+          onClick={() => onSideChange(MarketSide.SHORT)}
           className={`flex-1 font-bold text-sm transition-all ${side === MarketSide.SHORT ? 'bg-red-500 text-black' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
         >
           SHORT

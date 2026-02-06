@@ -3,12 +3,14 @@ import { useAccount, usePublicClient } from 'wagmi';
 import { parseUnits } from 'viem';
 import { Vault } from '../../types';
 import { CONTRACTS, FEES } from '../../constants';
-import { useTokenBalance } from '../../hooks/useBalances';
+import { useTokenBalance, useETHBalance } from '../../hooks/useBalances';
 import { useLiquidity } from '../../hooks/useLiquidity';
 import { useCreateDeposit } from '../../hooks/useCreateDeposit';
 import { useCreateWithdrawal } from '../../hooks/useCreateWithdrawal';
 import { useTokenApproval } from '../../hooks/useTokenApproval';
 import { useLiquidityHistory } from '../../hooks/useLiquidityHistory';
+import { useOptimalDeposit } from '../../hooks/useOptimalDeposit';
+import { useDepositEstimate } from '../../hooks/useDepositEstimate';
 import toast from 'react-hot-toast';
 
 interface VaultDrawerProps {
@@ -21,16 +23,76 @@ interface VaultDrawerProps {
 const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isConnected }) => {
   const { address } = useAccount();
   const [activeTab, setActiveTab] = useState<'add' | 'remove'>('add');
-  const [amount, setAmount] = useState('');
+  
+  // Deposit State
+  const [depositMode, setDepositMode] = useState<'long' | 'short' | 'pair'>('short');
+  const [amountLong, setAmountLong] = useState('');
+  const [amountShort, setAmountShort] = useState('');
+  // Withdraw State
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  
+  // Optimal Deposit State
+  const [totalUsdInput, setTotalUsdInput] = useState('');
 
-  // Hooks
-  const { balance: usdcBalance } = useTokenBalance(address, CONTRACTS.usdc as `0x${string}`);
+  // Determine Token Addresses
+  const longTokenAddress = vault.marketData?.longToken;
+  const shortTokenAddress = vault.marketData?.shortToken || CONTRACTS.usdc;
+  
+  // Balances
+  const { balance: nativeBalance } = useETHBalance(address);
+  // This hook fetches balance for the specific longTokenAddress (could be WNT, GMX, BTC, etc.)
+  const { balance: specificLongTokenBalance, symbol: longTokenSymbol } = useTokenBalance(address, longTokenAddress as `0x${string}`);
+  const { balance: shortBalance } = useTokenBalance(address, shortTokenAddress as `0x${string}`);
+  
+  // Determine if Long Token is WNT (Native Wrapper)
+  const isLongTokenWNT = longTokenAddress?.toLowerCase() === CONTRACTS.wnt.toLowerCase();
+  
+  // Logic: 
+  // - If WNT: User can use BOTH HNC (native) and WNT.
+  // - If GMX/Other: User deposits that token directly.
+  
+  const longBalance = React.useMemo(() => {
+    if (!isLongTokenWNT) return specificLongTokenBalance;
+    const native = parseFloat(nativeBalance?.replace(/,/g, '') || '0');
+    const wnt = parseFloat(specificLongTokenBalance?.replace(/,/g, '') || '0');
+    return (native + wnt).toFixed(4); // Combined Capacity
+  }, [isLongTokenWNT, nativeBalance, specificLongTokenBalance]);
+
+  const longSymbol = isLongTokenWNT ? 'HNC + WNT' : (vault.token === 'GMX' ? 'GMX' : (longTokenSymbol || 'Long Token'));
+  
   const { data: liquidityData } = useLiquidity(
     vault.marketData?.marketToken,
     vault.marketData?.longToken,
     vault.marketData?.shortToken
   );
   const { data: historyData } = useLiquidityHistory(address);
+  
+  // Optimal Deposit Calculator Hook
+  const { data: optimalDeposit, isLoading: isCalculating } = useOptimalDeposit({
+    marketAddress: vault.marketData?.marketToken,
+    totalUsd: parseFloat(totalUsdInput) || 0,
+  });
+  
+  // Auto-fill function for optimal deposit
+  const handleCalculateOptimal = () => {
+    if (optimalDeposit) {
+      setAmountLong(optimalDeposit.longAmount);
+      setAmountShort(optimalDeposit.shortAmount);
+      toast.success(`Optimal: ${optimalDeposit.longAmount} Long + ${optimalDeposit.shortAmount} Short`, { icon: '✨' });
+    }
+  };
+  
+  // Accurate Deposit Estimate from Reader contract
+  const { data: depositEstimate, isLoading: isEstimating } = useDepositEstimate({
+    marketAddress: vault.marketData?.marketToken,
+    longTokenAddress: vault.marketData?.longToken,
+    shortTokenAddress: vault.marketData?.shortToken,
+    indexTokenAddress: vault.marketData?.indexToken,
+    longAmount: depositMode === 'short' ? '0' : amountLong,
+    shortAmount: depositMode === 'long' ? '0' : amountShort,
+    longDecimals: 18,
+    shortDecimals: 6,
+  });
   
   // Destructure isConfirmed and txHash for Toasts
   const { 
@@ -47,21 +109,58 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     txHash: withdrawTxHash 
   } = useCreateWithdrawal(address);
   
-  // Approval Hook for USDC (Deposit)
-  // Approval Hook - Dynamic based on active tab
-  const activeSingleToken = vault.marketData?.shortToken || CONTRACTS.usdc; // Default to Short Token (USDC) for deposit
-  const approvalToken = activeTab === 'add' ? activeSingleToken : (vault.marketData?.marketToken || vault.tokenAddress); 
-  const decimals = activeTab === 'add' ? 6 : 18;
-  const amountBigInt = amount && !isNaN(parseFloat(amount)) ? parseUnits(amount, decimals) : 0n;
+  // Amounts for Approval
+  const longAmountBigInt = amountLong && !isNaN(parseFloat(amountLong)) ? parseUnits(amountLong, 18) : 0n;
+  const shortAmountBigInt = amountShort && !isNaN(parseFloat(amountShort)) ? parseUnits(amountShort, 6) : 0n;
+  const withdrawAmountBigInt = withdrawAmount && !isNaN(parseFloat(withdrawAmount)) ? parseUnits(withdrawAmount, 18) : 0n;
 
+  // Determine WNT amount to use for approval (Hybrid Logic replication)
+  const wntAmountToApproval = React.useMemo(() => {
+     if (!isLongTokenWNT) return 0n;
+     const wntBalStr = specificLongTokenBalance?.replace(/,/g, '') || '0';
+     const amountStr = amountLong || '0';
+     if (!amountStr || isNaN(parseFloat(amountStr))) return 0n;
+     
+     const wntBal = parseUnits(wntBalStr, 18);
+     const amount = parseUnits(amountStr, 18);
+     
+     // We use min(amount, wntBalance) for WNT portion
+     if (wntBal >= amount) return amount;
+     return wntBal;
+  }, [isLongTokenWNT, specificLongTokenBalance, amountLong]);
+
+  // 1. Long Token Approval (WNT/GMX)
   const { 
-    isApproved, 
-    isApproving, 
-    approve, 
+    isApproved: isLongApproved, 
+    isApproving: isLongApproving, 
+    approve: approveLong, 
   } = useTokenApproval({
-    tokenAddress: approvalToken as `0x${string}`,
-    spenderAddress: CONTRACTS.router as `0x${string}`, // FIX: Use Router (same as orders) - it's the actual spender for sendTokens
-    amount: amountBigInt
+    tokenAddress: longTokenAddress as `0x${string}`,
+    spenderAddress: CONTRACTS.router as `0x${string}`, 
+    // If WNT, we only need to approve the WNT portion we are actually using
+    amount: isLongTokenWNT ? wntAmountToApproval : longAmountBigInt
+  });
+
+  // 2. Short Token Approval (USDC)
+  const { 
+    isApproved: isShortApproved, 
+    isApproving: isShortApproving, 
+    approve: approveShort, 
+  } = useTokenApproval({
+    tokenAddress: shortTokenAddress as `0x${string}`,
+    spenderAddress: CONTRACTS.router as `0x${string}`, 
+    amount: shortAmountBigInt
+  });
+
+  // 3. GM Token Approval (For Withdraw)
+  const { 
+    isApproved: isGmApproved, 
+    isApproving: isGmApproving, 
+    approve: approveGm, 
+  } = useTokenApproval({
+    tokenAddress: vault.marketData?.marketToken as `0x${string}`,
+    spenderAddress: CONTRACTS.router as `0x${string}`, 
+    amount: withdrawAmountBigInt
   });
 
   // Toast on Deposit Confirmation
@@ -72,9 +171,10 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
           Deposit Confirmed! <br/>
           <a href={`http://115.75.100.60:8067/tx/${depositTxHash}`} target="_blank" rel="noreferrer" className="underline font-bold">View on Explorer</a>
         </div>,
-        { duration: 8000 }
+        { duration: 5000, id: 'deposit-success' }
       );
-      setAmount(''); // Reset form on success
+      setAmountLong('');
+      setAmountShort('');
     }
   }, [isDepositConfirmed, depositTxHash]);
 
@@ -86,25 +186,53 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
           Withdrawal Confirmed! <br/>
           <a href={`http://115.75.100.60:8067/tx/${withdrawTxHash}`} target="_blank" rel="noreferrer" className="underline font-bold">View on Explorer</a>
         </div>,
-        { duration: 8000 }
+        { duration: 5000, id: 'withdraw-success' }
       );
-      setAmount(''); // Reset form on success
+      setWithdrawAmount('');
     }
   }, [isWithdrawConfirmed, withdrawTxHash]);
 
-  const isSubmitting = isDepositing || isWithdrawing || isApproving;
+  const isSubmitting = isDepositing || isWithdrawing || isLongApproving || isShortApproving || isGmApproving;
   
-  // Validation
-  const balance = activeTab === 'add' ? parseFloat(usdcBalance) : parseFloat(liquidityData?.userGmBalance || '0');
-  const isValid = amount && !isNaN(parseFloat(amount)) && parseFloat(amount) <= balance && parseFloat(amount) > 0;
-
-  const handleMaxClick = () => {
-    if (activeTab === 'add') {
-      setAmount(usdcBalance);
-    } else {
-      setAmount(liquidityData?.userGmBalance || '0');
+  // Validation Helper
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>, setter: (v: string) => void) => {
+    const value = e.target.value;
+    // Allow empty, or valid positive float (no standard negative sign)
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+        setter(value);
     }
   };
+
+  const getError = (amount: string, balance: string | undefined) => {
+     if (!amount) return null;
+     const val = parseFloat(amount);
+     const bal = parseFloat(balance?.replace(/,/g, '') || '0');
+     if (isNaN(val)) return 'Invalid amount';
+     if (val > bal) return 'Exceeds balance';
+     return null;
+  };
+
+  const isValidDeposit = () => {
+      const longVal = parseFloat(amountLong || '0');
+      const shortVal = parseFloat(amountShort || '0');
+      const longBal = parseFloat(longBalance || '0');
+      const shortBal = parseFloat(shortBalance || '0');
+
+      if (depositMode === 'long') return longVal > 0 && longVal <= longBal;
+      if (depositMode === 'short') return shortVal > 0 && shortVal <= shortBal;
+      if (depositMode === 'pair') {
+          // At least one > 0, and all entered must be valid
+          if (longVal === 0 && shortVal === 0) return false;
+          if (longVal > longBal) return false;
+          if (shortVal > shortBal) return false;
+          return true;
+      }
+      return false;
+  };
+
+  const isValidWithdraw = parseFloat(withdrawAmount) > 0 && parseFloat(withdrawAmount) <= parseFloat(liquidityData?.userGmBalance || '0');
+  const isValid = activeTab === 'add' ? isValidDeposit() : isValidWithdraw;
+
 
   // Get public client to wait for tx receipts
   const publicClient = usePublicClient();
@@ -115,63 +243,79 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
     try {
       if (activeTab === 'add') {
         // ========== DEPOSIT FLOW ==========
-        // 1. Check & Execute Approval if needed
-        if (!isApproved) {
-          toast('Approval needed. Please confirm in wallet...', { icon: '🔐' });
-          const approveHash = await approve();
-          if (!approveHash) return;
-          
-          const toastId = toast.loading('Approving USDC...');
-          if (publicClient) {
-            await publicClient.waitForTransactionReceipt({ hash: approveHash });
-            toast.dismiss(toastId);
-            toast.success('Approved! Creating deposit...');
-          }
-          // Small delay for state to settle
-          await new Promise(r => setTimeout(r, 500));
+        
+        // Check Approvals based on INPUT amounts (not just mode)
+        // NOTE: Skip long token approval if it's WNT - we use sendWnt which wraps native HNC automatically
+        const isLongTokenWNT = longTokenAddress?.toLowerCase() === CONTRACTS.wnt.toLowerCase();
+        
+        // CORRECTION: We strictly follow the hook logic: if wntAmountToApproval > 0, we need approval!
+        const needsLongApproval = !isLongTokenWNT 
+            ? (depositMode === 'long' || depositMode === 'pair') && parseUnits(amountLong || '0', 18) > 0n && !isLongApproved
+            : wntAmountToApproval > 0n && !isLongApproved; // New WNT logic
+            
+        const needsShortApproval = (depositMode === 'short' || depositMode === 'pair') && parseUnits(amountShort || '0', 6) > 0n && !isShortApproved;
+
+        if (needsLongApproval) {
+          toast('Approving Long Token...', { icon: '🔐' });
+          const hash = await approveLong();
+          if (hash && publicClient) await publicClient.waitForTransactionReceipt({ hash });
         }
 
-        // 2. Execute Deposit
+        if (needsShortApproval) {
+          toast('Approving USDC...', { icon: '🔐' });
+          const hash = await approveShort();
+          if (hash && publicClient) await publicClient.waitForTransactionReceipt({ hash });
+        }
+        
+        // Execute Deposit
         await createDeposit({
           marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
-          tokenAddress: activeSingleToken as `0x${string}`,
-          amount,
-          decimals: 6 // USDC
+          // Pass legacy tokenAddress/decimals just in case (optional)
+          tokenAddress: depositMode === 'short' ? shortTokenAddress as `0x${string}` : longTokenAddress as `0x${string}`,
+          amount: '0', 
+          decimals: 18,
+          
+          longToken: longTokenAddress as `0x${string}`,
+          shortToken: shortTokenAddress as `0x${string}`,
+          longAmount: (depositMode === 'long' || depositMode === 'pair') ? amountLong : undefined,
+          shortAmount: (depositMode === 'short' || depositMode === 'pair') ? amountShort : undefined,
         });
-        setAmount('');
+        
+        setAmountLong('');
+        setAmountShort('');
 
       } else {
         // ========== WITHDRAW FLOW ==========
-        // 1. Check & Execute Approval if needed  
-        if (!isApproved) {
-          toast('Approval needed. Please confirm in wallet...', { icon: '🔐' });
-          const approveHash = await approve();
-          if (!approveHash) return;
-          
-          const toastId = toast.loading(`Approving ${vault.token}...`);
-          if (publicClient) {
-            await publicClient.waitForTransactionReceipt({ hash: approveHash });
-            toast.dismiss(toastId);
-            toast.success('Approved! Creating withdrawal...');
-          }
-          // Small delay for state to settle
-          await new Promise(r => setTimeout(r, 500));
+        if (!isGmApproved) {
+           toast('Approving GM Token...', { icon: '🔐' });
+           const hash = await approveGm();
+           if (hash && publicClient) await publicClient.waitForTransactionReceipt({ hash });
         }
 
-        // 2. Execute Withdrawal
         await createWithdrawal({
           marketAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
           marketTokenAddress: (vault.marketData?.marketToken || CONTRACTS.market) as `0x${string}`,
-          amount,
+          amount: withdrawAmount,
           decimals: 18 // GM Token
         });
-        setAmount('');
+        setWithdrawAmount('');
       }
       
     } catch (e) {
       console.error(e);
       toast.error('Operation failed');
     }
+  };
+
+  const formatShare = (val: string) => {
+      if (!val) return '0%';
+      // Remove % if present
+      const cleanVal = val.replace('%', '');
+      const v = parseFloat(cleanVal);
+      if (isNaN(v)) return val;
+      if (v === 0) return '0%';
+      if (v < 0.0001) return '< 0.0001%';
+      return v.toFixed(4) + '%';
   };
 
   if (!isOpen) return null;
@@ -199,21 +343,77 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
         <div className="flex-1 overflow-auto p-4 space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <DetailStat label="Your Deposits" value={`$${liquidityData?.userGmBalanceUsd || '0.00'}`} />
-            <DetailStat label="Your Share" value="~0.01%" />
+            <DetailStat label="Your Share" value={formatShare(liquidityData?.sharePercentage || '0')} />
             <DetailStat label="Unrealized PnL" value="$0.00" color="text-emerald-400" />
             <DetailStat label="Accrued Fees" value="$0.00" />
           </div>
 
+          {/* Backing Composition */}
+          {liquidityData && (
+             <div className="space-y-3 pt-2 pb-2">
+               <div className="flex justify-between items-center px-1">
+                   <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Backing Composition</h4>
+                   <div className="text-[10px] text-gray-500 font-mono">
+                     ${liquidityData.marketTvlUsd} TVL
+                   </div>
+               </div>
+               
+               {/* Visual Bar */}
+               <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden flex">
+                  <div 
+                    className="h-full bg-indigo-500 transition-all duration-500" 
+                    style={{ width: `${liquidityData.longPoolPercentage || 50}%` }}
+                  />
+                  <div 
+                    className="h-full bg-emerald-500 transition-all duration-500" 
+                    style={{ width: `${liquidityData.shortPoolPercentage || 50}%` }}
+                  />
+               </div>
+
+               {/* Legend / Details */}
+               <div className="grid grid-cols-2 gap-4">
+                  {/* Long Side */}
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-lg p-3">
+                     <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase">{longSymbol} (Longs)</span>
+                     </div>
+                     <div className="text-sm font-bold text-gray-200">
+                        {(liquidityData.longPoolAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                     </div>
+                     <div className="text-[10px] text-gray-500">
+                        ${(liquidityData.longPoolUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({liquidityData.longPoolPercentage?.toFixed(1) || '0.0'}%)
+                     </div>
+                  </div>
+
+                  {/* Short Side */}
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 text-right">
+                     <div className="flex items-center justify-end gap-2 mb-1">
+                        <span className="text-[10px] font-bold text-emerald-400 uppercase">USDC (Shorts)</span>
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                     </div>
+                     <div className="text-sm font-bold text-gray-200">
+                        {(liquidityData.shortPoolAmount || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                     </div>
+                     <div className="text-[10px] text-gray-500">
+                        ({liquidityData.shortPoolPercentage?.toFixed(1) || '0.0'}%) ${(liquidityData.shortPoolUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} 
+                     </div>
+                  </div>
+               </div>
+             </div>
+          )}
+
+
           <div className="bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
             <div className="flex border-b border-gray-800">
               <button 
-                onClick={() => { setActiveTab('add'); setAmount(''); }}
+                onClick={() => { setActiveTab('add'); }}
                 className={`flex-1 py-3 text-xs font-bold uppercase transition-all ${activeTab === 'add' ? 'bg-emerald-500/10 text-emerald-400 border-b-2 border-emerald-500' : 'text-gray-500 hover:text-gray-300'}`}
               >
                 Add Liquidity
               </button>
               <button 
-                onClick={() => { setActiveTab('remove'); setAmount(''); }}
+                onClick={() => { setActiveTab('remove'); }}
                 className={`flex-1 py-3 text-xs font-bold uppercase transition-all ${activeTab === 'remove' ? 'bg-amber-500/10 text-amber-400 border-b-2 border-amber-500' : 'text-gray-500 hover:text-gray-300'}`}
               >
                 Remove Liquidity
@@ -221,32 +421,194 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
             </div>
 
             <div className="p-6 space-y-6">
-              <div>
-                <div className="flex justify-between items-end mb-2">
-                  <label className="text-[10px] text-gray-500 font-bold uppercase">Amount ({activeTab === 'add' ? 'USDC' : 'GM'})</label>
-                  <span className="text-[10px] text-gray-600">
-                    Wallet: {activeTab === 'add' ? `${usdcBalance} USDC` : `${liquidityData?.userGmBalance || '0.00'} GM`}
-                  </span>
-                </div>
-                <div className="relative">
-                  <input 
-                    type="number" 
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="0.00"
-                    className="w-full bg-[#0C111A] border border-gray-800 rounded-lg pl-4 pr-24 py-3 text-lg font-bold focus:outline-none focus:border-emerald-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
-                    <span className="text-xs text-gray-600 font-bold">{activeTab === 'add' ? 'USDC' : 'GM'}</span>
+              {/* Token Selector (Only show for Add Liquidity) */}
+              {activeTab === 'add' && (
+                  <div className="flex bg-black/40 p-1 rounded-lg border border-gray-800">
+                      <button 
+                        onClick={() => setDepositMode('short')}
+                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${depositMode === 'short' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      >
+                         USDC (Shorts)
+                      </button>
+                      <button 
+                        onClick={() => setDepositMode('long')}
+                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${depositMode === 'long' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      >
+                         Longs
+                      </button>
+                      <button 
+                        onClick={() => setDepositMode('pair')}
+                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${depositMode === 'pair' ? 'bg-emerald-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                      >
+                         Pair
+                      </button>
+                  </div>
+              )}
+
+              {/* Optimal Deposit Calculator (Only in Pair Mode) */}
+              {activeTab === 'add' && depositMode === 'pair' && (
+                <div className="bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 border border-emerald-500/20 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">⚡ Zero Impact Deposit</span>
+                    {optimalDeposit?.poolImbalance && (
+                      <span className={`text-[9px] px-2 py-0.5 rounded-full ${
+                        optimalDeposit.poolImbalance.isBalanced 
+                          ? 'bg-emerald-500/20 text-emerald-400' 
+                          : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        Pool: {optimalDeposit.poolImbalance.longPercentage.toFixed(0)}% / {optimalDeposit.poolImbalance.shortPercentage.toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                      <input 
+                        type="text" 
+                        inputMode="decimal"
+                        value={totalUsdInput}
+                        onChange={(e) => handleAmountChange(e, setTotalUsdInput)}
+                        placeholder="Total USD to deposit"
+                        className="w-full bg-black/40 border border-gray-700 rounded-lg pl-7 pr-4 py-2 text-sm font-bold focus:outline-none focus:border-emerald-500/50 transition-colors"
+                      />
+                    </div>
                     <button 
-                      onClick={handleMaxClick}
-                      className="text-[10px] bg-gray-800 px-1.5 py-0.5 rounded text-gray-400 hover:bg-gray-700 uppercase"
+                      onClick={handleCalculateOptimal}
+                      disabled={!optimalDeposit || isCalculating}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap"
                     >
-                      Max
+                      {isCalculating ? '...' : 'Calculate'}
                     </button>
                   </div>
+                  
+                  {optimalDeposit && parseFloat(totalUsdInput) > 0 && (
+                    <div className="text-[10px] text-gray-400 flex justify-between">
+                      <span>≈ {optimalDeposit.longAmount} {longSymbol}</span>
+                      <span>+</span>
+                      <span>≈ {optimalDeposit.shortAmount} USDC</span>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
+
+              {/* Input Fields */}
+              {activeTab === 'add' ? (
+                <div className="space-y-4">
+                    {/* Short Token Input */}
+                    {(depositMode === 'short' || depositMode === 'pair') && (
+                        <div>
+                            <div className="flex justify-between items-end mb-2">
+                                <label className="text-[10px] text-gray-500 font-bold uppercase">Amount (USDC)</label>
+                                <span className="text-[10px] text-gray-600">Wallet: {shortBalance}</span>
+                            </div>
+                            <div className="relative">
+                                <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={amountShort}
+                                    onChange={(e) => handleAmountChange(e, setAmountShort)}
+                                    placeholder="0.00"
+                                    className={`w-full bg-[#0C111A] border ${getError(amountShort, shortBalance) ? 'border-red-500/50 focus:border-red-500' : 'border-gray-800 focus:border-emerald-500/50'} rounded-lg pl-4 pr-16 py-3 text-lg font-bold focus:outline-none transition-colors`}
+                                />
+                                <button onClick={() => setAmountShort(shortBalance)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-gray-800 px-2 py-1 rounded text-gray-400 hover:text-white">MAX</button>
+                            </div>
+                            {getError(amountShort, shortBalance) && <div className="text-[10px] text-red-400 mt-1 font-bold">{getError(amountShort, shortBalance)}</div>}
+                        </div>
+                    )}
+
+                    {/* Long Token Input */}
+                    {(depositMode === 'long' || depositMode === 'pair') && (
+                        <div>
+                            <div className="flex justify-between items-end mb-2">
+                                <label className="text-[10px] text-gray-500 font-bold uppercase">
+                                  Amount ({longSymbol})
+                                </label>
+                                <span className="text-[10px] text-gray-600">Wallet: {longBalance}</span>
+                            </div>
+                            <div className="relative">
+                                <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={amountLong}
+                                    onChange={(e) => handleAmountChange(e, setAmountLong)}
+                                    placeholder="0.00"
+                                    className={`w-full bg-[#0C111A] border ${getError(amountLong, longBalance) ? 'border-red-500/50 focus:border-red-500' : 'border-gray-800 focus:border-indigo-500/50'} rounded-lg pl-4 pr-16 py-3 text-lg font-bold focus:outline-none transition-colors`}
+                                />
+                                <button 
+                                  onClick={() => {
+                                    if (isLongTokenWNT) {
+                                      // Native + WNT: Subtract Gas Buffer (0.01) ONLY from Native part if needed? 
+                                      // Valid Max = Total - 0.01 (limit by gas safety)
+                                      const val = parseFloat(longBalance || '0');
+                                      const max = Math.max(0, val - 0.01);
+                                      setAmountLong(max.toFixed(4));
+                                    } else {
+                                      setAmountLong(longBalance || '0');
+                                    }
+                                  }}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-gray-800 px-2 py-1 rounded text-gray-400 hover:text-white"
+                                >
+                                  MAX
+                                </button>
+                            </div>
+                            {getError(amountLong, longBalance) && <div className="text-[10px] text-red-400 mt-1 font-bold">{getError(amountLong, longBalance)}</div>}
+                        </div>
+                    )}
+                </div>
+              ) : (
+                // Withdraw Input
+                <div>
+                     <div className="flex justify-between items-end mb-2">
+                        <label className="text-[10px] text-gray-500 font-bold uppercase">Amount (GM)</label>
+                        <span className="text-[10px] text-gray-600">Balance: {liquidityData?.userGmBalance || '0.00'}</span>
+                    </div>
+                    <div className="relative">
+                        <input 
+                            type="text" 
+                            inputMode="decimal"
+                            value={withdrawAmount}
+                            onChange={(e) => handleAmountChange(e, setWithdrawAmount)}
+                            placeholder="0.00"
+                            className={`w-full bg-[#0C111A] border ${getError(withdrawAmount, liquidityData?.userGmBalance) ? 'border-red-500/50 focus:border-red-500' : 'border-gray-800 focus:border-amber-500/50'} rounded-lg pl-4 pr-16 py-3 text-lg font-bold focus:outline-none transition-colors`}
+                        />
+                        <button onClick={() => setWithdrawAmount(liquidityData?.userGmBalance || '0')} className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] bg-gray-800 px-2 py-1 rounded text-gray-400 hover:text-white">MAX</button>
+                    </div>
+                    {getError(withdrawAmount, liquidityData?.userGmBalance) && <div className="text-[10px] text-red-400 mt-1 font-bold">{getError(withdrawAmount, liquidityData?.userGmBalance)}</div>}
+                </div>
+              )}
+
+              {/* Price Impact Indicator (Add Liquidity Only) */}
+              {activeTab === 'add' && depositEstimate && (
+                <div className={`p-3 rounded-lg border ${
+                  depositEstimate.impactLevel === 'positive' ? 'bg-emerald-500/20 border-emerald-500/30' :
+                  depositEstimate.impactLevel === 'negative' ? 'bg-red-500/20 border-red-500/30' :
+                  'bg-yellow-500/20 border-yellow-500/30'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      {isEstimating ? 'Calculating...' : 'Price Impact (On-Chain)'}
+                    </span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                      depositEstimate.impactLevel === 'positive' ? 'bg-emerald-500/20 text-emerald-400' :
+                      depositEstimate.impactLevel === 'negative' ? 'bg-red-500/20 text-red-400' :
+                      'bg-yellow-500/20 text-yellow-400'
+                    }`}>
+                      {depositEstimate.impactLabel}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-[10px]">
+                    <div>
+                      <span className="text-gray-500">You Receive</span>
+                      <div className="font-bold text-white">${depositEstimate.estimatedUsd.toFixed(2)}</div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-gray-500">Est. GM Tokens</span>
+                      <div className="font-bold text-white">{parseFloat(depositEstimate.estimatedGmTokens).toFixed(4)} GM</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-3 bg-black/20 p-4 rounded-lg">
                 <SummaryRow label="Protocol Share Delta" value="+0.015%" />
@@ -262,11 +624,11 @@ const VaultDrawer: React.FC<VaultDrawerProps> = ({ isOpen, onClose, vault, isCon
                 {isSubmitting ? (
                   <>
                     <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    <span>{isApproving ? 'Approving...' : isDepositing ? 'Depositing...' : isWithdrawing ? 'Withdrawing...' : 'Processing...'}</span>
+                    <span>Processing...</span>
                   </>
                 ) : (
                   activeTab === 'add' 
-                    ? `Deposit ${vault.token}` 
+                    ? `Deposit ${depositMode === 'pair' ? 'Pair' : vault.token}` 
                     : `Withdraw ${vault.token}`
                 )}
               </button>

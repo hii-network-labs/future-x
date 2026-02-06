@@ -18,14 +18,20 @@ export enum OrderType {
 export interface Position {
   id: string;
   market: string;
+  marketAddress: `0x${string}`; // Added for closing actions
+  collateralToken: `0x${string}`; // Added for closing actions
+  indexToken: `0x${string}`; // Added for price lookup
   side: MarketSide;
   size: number; // USD
+  sizeRaw: bigint; // Added for precise operations
   collateral: number; // USD
   entryPrice: number;
   markPrice: number;
   leverage: number;
   liqPrice: number;
   pnl: number;
+  timestamp: number; // Added from Subgraph
+  indexDecimals?: number; // Added for dynamic price scaling
 }
 
 export interface PendingOrder {
@@ -36,6 +42,7 @@ export interface PendingOrder {
   price: number;
   status: OrderStatus;
   timestamp: number;
+  marketAddress?: string; // Added to link order to position
 }
 
 export interface ChainState {
@@ -92,4 +99,15 @@ export interface Market {
   longDecimals?: number;          // Decimals of long token
   poolValueUsd?: number;          // Total liquidity in USD
   isActive: boolean;              // Has sufficient liquidity
+  
+  // Backing Composition
+  longPoolAmount?: number;
+  shortPoolAmount?: number;
+  longPoolUsd?: number;
+  shortPoolUsd?: number;
+  longPoolPercentage?: number;
+  shortPoolPercentage?: number;
+  
+  // Price Data
+  indexTokenPrice?: { price: string; timestamp?: number };
 }
