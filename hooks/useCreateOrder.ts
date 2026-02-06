@@ -136,6 +136,16 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
         referralCode: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         dataList: [] as `0x${string}`[],
       };
+      
+      // DEBUG: Log key checks for OrderNotFulfillableAtAcceptablePrice
+      console.log('🔍 Acceptable Price Check:', {
+           acceptablePrice: orderParams.numbers.acceptablePrice.toString(),
+           expectedExecutionPrice: params.currentPrice,
+           isLong: params.isLong,
+           slippageCheck: params.isLong 
+              ? `${orderParams.numbers.acceptablePrice} > ExecutionPrice?` 
+              : `${orderParams.numbers.acceptablePrice} < ExecutionPrice?`
+      });
 
       // Encode multicall functions
       const calls: `0x${string}`[] = [];
@@ -256,7 +266,8 @@ export function useCreateOrder(address: `0x${string}` | undefined) {
       console.error('❌ Order creation failed:', error);
       
       // User-friendly error messages
-      if (error.message?.includes('User rejected')) {
+      if (error.message?.toLowerCase().includes('user rejected') || 
+          error.message?.toLowerCase().includes('user denied')) {
         toast.error('Transaction cancelled');
       } else if (error.message?.includes('insufficient funds')) {
         toast.error('Insufficient funds for gas');

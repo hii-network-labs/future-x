@@ -49,10 +49,11 @@ export function calculateAcceptablePrice(
     acceptablePrice30 = currentPrice30 * (BPS_DIVISOR - slippageBps) / BPS_DIVISOR;
   }
 
-  // Scale to Compact Decimals
-  // Contract Expects: Price * 10^(30 - TokenDecimals)
-  // Input currentPrice30 is Price * 10^30.
-  // We need to divide by 10^TokenDecimals.
+  // Scale to Compact Decimals (CRITICAL FOR CONTRACT COMPATIBILITY)
+  // Oracle/Contract uses prices in 10^(30 - tokenDecimals) format
+  // For WNT (18 decimals): 10^(30-18) = 10^12 decimals
+  // For BTC (8 decimals): 10^(30-8) = 10^22 decimals
+  // Input currentPrice30 is 10^30, so divide by 10^tokenDecimals
   const decimalsScale = 10n ** BigInt(indexDecimals);
   const compactPrice = acceptablePrice30 / decimalsScale;
   

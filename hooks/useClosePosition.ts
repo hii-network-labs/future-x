@@ -189,8 +189,9 @@ export const useClosePosition = () => {
       console.error('Close position error:', error);
       
       // User-friendly error messages
-      if (error.message?.includes('user rejected')) {
-        toast.error('Transaction rejected');
+      if (error.message?.toLowerCase().includes('user rejected') || 
+          error.message?.toLowerCase().includes('user denied')) {
+        toast.error('Transaction cancelled');
       } else if (error.message?.includes('insufficient funds')) {
         toast.error('Insufficient ETH for gas');
       } else if (error.message?.includes('InsufficientFundsToPayForCosts')) {
